@@ -8,6 +8,7 @@ written to storage.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 EMAIL = re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b")
@@ -47,13 +48,19 @@ def redact(text: str) -> Redaction:
     placeholders: dict[str, str] = {}
     counters: dict[str, int] = {}
 
-    def substitute(match: re.Match[str], label: str) -> str:
-        counters[label] = counters.get(label, 0) + 1
-        token = f"⟨{label}_{counters[label]}⟩"
-        placeholders[token] = match.group(0)
-        return token
+    def make_substituter(label: str) -> Callable[[re.Match[str]], str]:
+        """Bind the label explicitly — a closure over the loop variable would
+        capture the last label for every pattern."""
+
+        def substitute(match: re.Match[str]) -> str:
+            counters[label] = counters.get(label, 0) + 1
+            token = f"⟨{label}_{counters[label]}⟩"
+            placeholders[token] = match.group(0)
+            return token
+
+        return substitute
 
     for label, pattern in PATTERNS:
-        text = pattern.sub(lambda m, lbl=label: substitute(m, lbl), text)
+        text = pattern.sub(make_substituter(label), text)
 
     return Redaction(text=text, placeholders=placeholders)
