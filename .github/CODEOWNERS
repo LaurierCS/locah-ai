@@ -1,0 +1,19 @@
+# Code owners for LOCAH.ai.
+#
+# A pull request cannot be merged into `main` without an approving review from
+# someone listed here. Anyone may review and comment — and review from your pod
+# is still expected — but the merge approval comes from a maintainer.
+#
+# To add a maintainer (e.g. Nick), add their GitHub handle to the line below in
+# a pull request. That change itself requires a maintainer's approval, which is
+# the point.
+
+* @submarinejuice @Flapjacck
+
+# Privacy invariants (SDD §3). Changes here affect the commitments made to the
+# Students' Union in the funding proposal, so they are called out explicitly
+# rather than relying on the catch-all above.
+/backend/app/core/            @submarinejuice @Flapjacck
+/backend/tests/               @submarinejuice @Flapjacck
+/docs/                        @submarinejuice @Flapjacck
+/.github/                     @submarinejuice @Flapjacck
