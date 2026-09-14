@@ -15,3 +15,4 @@ def test_robots_disallow_is_respected() -> None: ...
 
 def test_allowlist_is_configured() -> None:
     assert "wlu.ca" in settings.allowed_hosts
+    assert "legacy.wlu.ca" in settings.allowed_hosts

@@ -3,7 +3,7 @@
 **Laurier Online Course Agent Helper**
 Owner: Laurier Computing Society
 Status: Draft v0.1 — Semester 1 (MVP)
-Last updated: 2026-09-10
+Last updated: 2026-09-14
 
 ---
 
@@ -36,7 +36,7 @@ Laurier's public information is accurate but fragmented:
 
 | # | Capability | Description |
 |---|---|---|
-| F1 | Crawler & knowledge base | Politely crawl `*.wlu.ca` public pages, extract main content, chunk, embed, index. Scheduled refresh. |
+| F1 | Crawler & knowledge base | Politely crawl allowlisted public `wlu.ca` pages, extract main content, chunk, embed, index. Scheduled refresh. |
 | F2 | Cited question answering | Retrieve → generate → every factual claim carries a source URL. Refuse rather than guess when retrieval is weak. |
 | F3 | Conflict surfacing | When two retrieved sources disagree on the same fact, present both with their URLs instead of picking one. |
 | F4 | Support-resource surfacing | When a question touches wellbeing, accessibility, financial aid, or advising, surface the relevant published Laurier resource alongside the answer. |
@@ -63,7 +63,7 @@ These are enforced in code and verified by tests. Each has an owning test file.
 
 | ID | Invariant | Enforcement |
 |---|---|---|
-| **INV-1** | The knowledge base contains **public web pages only**. No student records, internal systems, or proprietary documents. | Crawler domain+robots allowlist; ingestion rejects any non-HTTP source. `tests/test_crawler_scope.py` |
+| **INV-1** | The knowledge base contains **public web pages only**. No student records, internal systems, or proprietary documents. | Crawler hostname allowlist (`CRAWL_ALLOWLIST`) + `robots.txt`; ingestion rejects any non-HTTP source. `tests/test_crawler_scope.py` |
 | **INV-2** | **No PII reaches the model provider.** Names, student numbers, emails, phone numbers are stripped and replaced with placeholders before any outbound LLM call; placeholders restored locally. | `app/core/redaction.py` sits on the only egress path. `tests/test_redaction.py` |
 | **INV-3** | **Raw question text is never persisted with identity.** Analytics stores a redacted question, a topic label, and a timestamp. No IP, no session-to-person linkage, no account. | `app/analytics/logging.py`; DB schema has no user table in MVP. `tests/test_analytics_schema.py` |
 | **INV-4** | **Every factual sentence carries a citation**, and every citation resolves to a URL actually present in the retrieved context. | Post-generation citation validator rejects unsupported claims. `tests/test_citation_validation.py` |
@@ -95,30 +95,33 @@ These are enforced in code and verified by tests. Each has an owning test file.
                                      │
    ┌─────────────┐   HTTP/JSON   ┌───▼──────────────────────────┐   redacted   ┌──────────┐
    │  Next.js    │──────────────▶│  FastAPI                     │─────────────▶│ Claude   │
-   │  (student   │◀──────────────│  /ask  /health  /trends      │◀─────────────│ API      │
-   │   chat +    │   SSE stream  │  retrieval · safety · redact │              └──────────┘
-   │  dashboard) │               │  citation validation         │
-   └─────────────┘               └──────────────────────────────┘
+   │  (student   │◀──────────────│  /api/v1/ask · /health       │◀─────────────│ API      │
+   │   chat +    │   SSE stream  │  /trends · /conflicts        │              └──────────┘
+   │  dashboard) │               │  retrieval · safety · redact │
+   └─────────────┘               │  citation validation         │
+                                 └──────────────────────────────┘
 ```
 
 ### 4.2 Repository layout
 
 ```
-locah-ai/
-├── docs/                     # SDD, BRD, ADRs, runbooks
+.
+├── docs/                     # SDD, BRD (ADRs live in §13 of this document)
 ├── backend/
 │   ├── app/
-│   │   ├── api/              # FastAPI routers — HTTP only, no logic
+│   │   ├── api/              # FastAPI routers — HTTP only, no logic (S2+)
 │   │   ├── core/             # config, redaction, safety, errors
 │   │   ├── ingest/           # crawler, extractor, chunker, embedder
 │   │   ├── retrieval/        # hybrid search, reranking, conflict detection
 │   │   ├── llm/              # prompt templates, answer synthesis, validation
 │   │   └── analytics/        # question logging, clustering, reports
-│   ├── migrations/           # Alembic
+│   ├── alembic.ini
+│   ├── migrations/           # Alembic env + versions
+│   ├── pyproject.toml        # uv project
 │   └── tests/
-├── frontend/                 # Next.js (App Router) + Tailwind
-├── eval/                     # gold set + scoring harness
-└── scripts/                  # one-off ops scripts
+├── frontend/                 # Next.js (App Router) + Tailwind; pnpm
+├── eval/                     # gold set + scoring harness (S3)
+└── docker-compose.yml        # Postgres + pgvector only
 ```
 
 ### 4.3 Team decomposition (~10 volunteers, 5 pods)
@@ -141,10 +144,10 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 
 **Crawler** (`ingest/crawler.py`)
 - Seeds: advising, academic calendar, co-op, important dates, registrar, wellness, accessible learning, financial aid.
-- Scope: hostname must match the `*.wlu.ca` allowlist. **[INV-1]**
+- Scope: hostname must be on the explicit `CRAWL_ALLOWLIST` (public `wlu.ca` hosts only). **[INV-1]**
 - Politeness: obeys `robots.txt`, ≥1 s delay per host, single concurrent connection per host, descriptive `User-Agent` with a contact address.
 - Depth cap, page cap, and content-type filter (`text/html`, `application/pdf`).
-- Persists `documents(url, http_status, content_hash, fetched_at, etag)`. Unchanged `content_hash` short-circuits re-embedding.
+- Persists `documents(url, http_status, content_hash, etag, fetched_at)`. Unchanged `content_hash` short-circuits re-embedding.
 
 **Extractor** (`ingest/extract.py`)
 - HTML → main content via `trafilatura`; strips nav, footer, cookie banners.
@@ -157,7 +160,7 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 
 **Embedder** (`ingest/embed.py`)
 - Batched embedding calls; retry with exponential backoff; upsert into `chunks.embedding vector(N)`.
-- Model choice is a config value, not a hardcode — see ADR-003.
+- Model choice is a config value (`EMBEDDING_MODEL`), not a hardcode — see ADR-003. Dimension is `vector(1024)` until S1 picks a model; changing it is a new migration.
 
 **Scheduling**: nightly full pass over high-churn seeds (dates, deadlines), weekly full crawl. A GitHub Actions cron triggers a backend job endpoint.
 
@@ -187,7 +190,7 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 ### 5.4 Safety & redaction
 
 **Redaction** (`core/redaction.py`) — **[INV-2]**
-- Regex + validated patterns for: Laurier student numbers, emails, phone numbers, postal codes; named-entity pass for person names.
+- Regex + validated patterns for: Laurier student numbers, emails, phone numbers, postal codes. A named-entity pass for person names is a follow-up if regex misses too much.
 - Replaces with stable placeholders (`⟨PERSON_1⟩`) held in an in-request map; restored locally on the way out. The map is never written to storage.
 
 **Safety gate** (`core/safety.py`) — **[INV-5]**
@@ -202,7 +205,7 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 - Does **not** write: IP, user agent, session identity, cookie, or anything joining two questions to one person.
 
 **Weekly clustering** (`analytics/cluster.py`)
-- Embed redacted questions → HDBSCAN (or k-means with silhouette selection) → label each cluster with a Claude-generated short description.
+- Embed redacted questions → sklearn k-means with silhouette selection → label each cluster with a Claude-generated short description. Revisit HDBSCAN if cluster quality is poor at larger volume.
 - Produces `clusters(week, label, size, sample_questions[], mean_confidence, refusal_rate)`.
 
 **Report** (`analytics/report.py`) — **[INV-6]**
@@ -213,7 +216,7 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 
 ### 5.6 Frontend
 
-- Next.js App Router, TypeScript, Tailwind, server components where possible.
+- Next.js 16 App Router, TypeScript, Tailwind CSS 4, server components where possible. pnpm.
 - Routes: `/` (chat), `/trends` (dashboard), `/about` (what it is, what it does not do, privacy posture — publicly visible, non-negotiable).
 - Chat UI shows citations inline as numbered chips that expand to the source URL and quoted passage. **The citation is part of the answer, not a footnote.**
 - Accessibility: WCAG 2.1 AA, keyboard-navigable, screen-reader tested. A tool for students who are stuck must work for students using assistive technology.
@@ -229,6 +232,7 @@ documents(
   url           text unique not null,
   title         text,
   content_hash  text not null,
+  etag          text,
   http_status   int,
   content_type  text,
   fetched_at    timestamptz not null,
@@ -242,7 +246,7 @@ chunks(
   heading_path  text,
   text          text not null,
   token_count   int,
-  embedding     vector(1024),
+  embedding     vector(1024),  -- EMBEDDING_MODEL TBD in S1; dim change = new migration
   tsv           tsvector generated,
   url_anchor    text
 );
@@ -318,7 +322,7 @@ Quality is a number we publish weekly, not a vibe.
 | False refusal | % of answerable questions wrongly refused | ≤ 10% |
 | P95 latency | First token | ≤ 2.5 s |
 
-CI runs a 40-question smoke subset on every PR; the full set runs nightly and on release. **A release that regresses accuracy or citation validity does not ship.**
+CI runs lint, typecheck, and unit tests on every PR. A 40-question eval smoke subset gates PRs once the harness exists (S3); the full set runs nightly and on release. **A release that regresses accuracy or citation validity does not ship.**
 
 ---
 
@@ -326,7 +330,7 @@ CI runs a 40-question smoke subset on every PR; the full set runs nightly and on
 
 - **Availability**: best-effort; this is a volunteer-run pilot. Target 99% during term, no on-call.
 - **Cost**: ≤ CAD $60/month at pilot scale. Embeddings are the fixed cost; generation scales with usage. Cost dashboard and a hard monthly cap that degrades to refusal-with-contact rather than surprise billing.
-- **Security**: no secrets in the repo; all config via environment. Dependabot on. A `SECURITY.md` with a disclosure address.
+- **Security**: no secrets in the repo; all config via environment. Dependabot on (`uv`, npm/pnpm, GitHub Actions). A `SECURITY.md` with a disclosure address.
 - **Privacy**: the invariants in §3 are the privacy design. A public `/about` page states them in plain language.
 - **Licensing**: crawled content is Laurier's; we index and quote with attribution and always link to the source. We do not republish pages wholesale.
 
@@ -336,11 +340,11 @@ CI runs a 40-question smoke subset on every PR; the full set runs nightly and on
 
 | Environment | Stack | Trigger |
 |---|---|---|
-| Local | `docker compose up` — Postgres+pgvector, FastAPI reload, Next dev | manual |
+| Local | `docker compose up -d db` (Postgres+pgvector); API via `uv`; Next via `pnpm` | manual |
 | Staging | Backend on Railway/Fly.io, frontend on Vercel, Neon/Supabase Postgres | push to `main` |
 | Production | Same, separate project + database | tagged release |
 
-CI (`.github/workflows/ci.yml`): lint (ruff, eslint) → typecheck (mypy, tsc) → unit tests → invariant tests → eval smoke subset.
+CI (`.github/workflows/ci.yml`): lint (ruff, eslint) → typecheck (mypy, tsc) → unit tests → invariant tests. Eval smoke subset is added in S3.
 
 ---
 
@@ -348,7 +352,7 @@ CI (`.github/workflows/ci.yml`): lint (ruff, eslint) → typecheck (mypy, tsc) �
 
 | Sprint | Weeks | Goal | Exit criterion |
 |---|---|---|---|
-| **S0 — Foundations** | 1–2 | Repo, CI, docker-compose, schema, pod assignment | `docker compose up` gives a working skeleton on every member's machine |
+| **S0 — Foundations** | 1–2 | Repo, CI, docker-compose (db), schema, pod assignment | `docker compose up -d db` + `uv`/`pnpm` gives a working skeleton on every member's machine |
 | **S1 — Ingest** | 3–4 | Crawler + extractor + chunker + embedder | ≥ 2,000 wlu.ca chunks indexed; re-crawl is idempotent |
 | **S2 — Answer** | 5–6 | Retrieval + generation + citations + refusal | End-to-end cited answer to a real question in the browser |
 | **S3 — Trust** | 7–8 | Conflict surfacing, safety gate, redaction, `/about` | All INV tests green; gold set v1 (150 q) complete |
@@ -375,7 +379,7 @@ Interviews with advisors and faculty run in parallel from week 1 — the proposa
 
 ## 13. Architecture Decision Records
 
-- **ADR-001 — Python backend + Next.js frontend.** RAG, evaluation, and NLP tooling is materially better in Python; the student-facing surface is materially better in React. The split also maps cleanly onto pods with different skill levels.
+- **ADR-001 — Python backend + Next.js frontend.** RAG, evaluation, and NLP tooling is materially better in Python; the student-facing surface is materially better in React. The split also maps cleanly onto pods with different skill levels. Backend is installed and run with **uv** (Python 3.14 locally, 3.12+ supported); frontend with **pnpm** (Node 24, Next.js 16).
 - **ADR-002 — Anthropic Claude as the model provider.** Strong instruction-following for citation discipline and refusal behaviour, which is the core quality risk here. Provider is behind one interface (`llm/client.py`) so it can be swapped.
 - **ADR-003 — Postgres + pgvector rather than a dedicated vector database.** One database for documents, embeddings, and analytics; free tier is sufficient at pilot scale; one fewer vendor account for a student club to hand over each year. Revisit above ~1M chunks.
 - **ADR-004 — Hybrid dense + sparse retrieval.** University pages are full of exact tokens (course codes, `CP104`, dates, GPA numbers) that dense retrieval alone handles poorly.

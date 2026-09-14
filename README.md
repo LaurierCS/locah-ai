@@ -21,19 +21,46 @@ Ask a question, get a plain-language answer with a link to the Laurier page it c
 
 ## Quick start
 
+**Option 1: Full Docker stack (recommended for new contributors)**
+
 ```bash
-cp .env.example .env        # add your ANTHROPIC_API_KEY
-docker compose up -d db     # Postgres + pgvector
-cd backend && pip install -e ".[dev]" && alembic upgrade head
-uvicorn app.main:app --reload
-cd ../frontend && npm install && npm run dev
+cp backend/.env.example backend/.env
+cp frontend/.env.example frontend/.env
+docker compose up
 ```
 
-Backend on `:8000`, frontend on `:3000`.
+- Backend on http://localhost:8000
+- Frontend on http://localhost:3000
+- Database on localhost:5432
+
+See [DOCKER_COMPOSE.md](DOCKER_COMPOSE.md) for other options (database-only, API-only, etc.).
+
+**Option 2: Native tools (for active development)**
+
+Install [uv](https://docs.astral.sh/uv/) and [pnpm](https://pnpm.io/) (Node 24+).
+
+```bash
+cp backend/.env.example backend/.env    # add your ANTHROPIC_API_KEY
+cp frontend/.env.example frontend/.env  # set BACKEND_URL if needed
+docker compose up -d db                 # Postgres + pgvector on :5432
+
+cd backend
+uv sync
+uv run alembic upgrade head
+uv run uvicorn app.main:app --reload
+
+cd ../frontend
+pnpm install
+pnpm run dev
+```
+
+Backend on http://localhost:8000, frontend on http://localhost:3000.
+
+Backend on `:8000`, frontend on `:3000`. Health check: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health).
 
 ## Stack
 
-Python 3.12 · FastAPI · PostgreSQL + pgvector · Anthropic Claude · Next.js 15 · TypeScript · Tailwind
+Python 3.12+ (3.14 via uv) · FastAPI · PostgreSQL + pgvector · Anthropic Claude · Next.js 16 · TypeScript 5 · Tailwind CSS 4 · Node 24 · uv · pnpm
 
 ## Status
 
