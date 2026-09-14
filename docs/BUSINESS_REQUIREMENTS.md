@@ -2,7 +2,7 @@
 
 Owner: Laurier Computing Society · Sponsor: Wilfrid Laurier University Students' Union
 Status: Draft v0.1 — Semester 1
-Last updated: 2026-09-10
+Last updated: 2026-09-14
 
 ---
 

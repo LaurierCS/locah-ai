@@ -4,19 +4,25 @@
 
 1. Read [docs/SDD.md §3 — Invariants](docs/SDD.md#3-invariants). They are non-negotiable. A PR that weakens one is rejected regardless of how good the rest is.
 2. Find your pod in [SDD §4.3](docs/SDD.md#43-team-decomposition-10-volunteers-5-pods). You own a directory.
-3. Get the stack running locally (see README). If it doesn't work, that's a bug in our docs — open an issue.
+3. Get the stack running locally. See [README.md](README.md) for Docker or native setup. See [DOCKER_COMPOSE.md](DOCKER_COMPOSE.md) for orchestration options. If it doesn't work, that's a bug in our docs — open an issue.
 
 ## Workflow
 
 - Branch from `main`: `feat/<pod>-<short-description>` or `fix/...`.
-- Small PRs. One reviewer from your pod, one from Platform for anything touching `core/` or the schema.
-- CI must be green: lint, typecheck, tests, and the eval smoke set.
+- Small PRs. One reviewer from your pod, one from Platform for anything touching `app/core/` or the schema.
+- CI must be green: lint, typecheck, and unit tests. The eval smoke set gates PRs once the harness exists (S3).
 - Conventional commits: `feat(ingest): heading-aware chunker`.
+
+## Tooling
+
+- Backend: `uv sync` then `uv run pytest`, `uv run ruff check .`, `uv run mypy`.
+- Frontend: `pnpm install` then `pnpm run lint`, `pnpm run typecheck`.
+- Schema changes: Alembic revision under `backend/migrations/versions/`. Apply with `uv run alembic upgrade head`.
 
 ## The rules that get PRs rejected
 
 - Adding a code path by which the safety classifier can downrank, suppress, or auto-resolve anything (**INV-5**).
-- Sending text to the model provider without passing through `core/redaction.py` (**INV-2**).
+- Sending text to the model provider without passing through `app/core/redaction.py` (**INV-2**).
 - Persisting anything that links a question to a person (**INV-3**).
 - An answer path that can emit a factual claim with no citation (**INV-4**).
 - Secrets in the repo. Ever.

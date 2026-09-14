@@ -9,6 +9,7 @@ venv/
 .pytest_cache/
 node_modules/
 .next/
+tsconfig.tsbuildinfo
 out/
 dist/
 build/
