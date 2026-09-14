@@ -42,8 +42,8 @@ class Redaction:
 def redact(text: str) -> Redaction:
     """Replace identifying values with stable placeholders.
 
-    TODO(core-pod): add a named-entity pass for person names. Regexes catch
-    structured identifiers; names need a model or gazetteer.
+    Regexes cover structured identifiers (email, phone, student number, postal
+    code). A named-entity pass for person names is a follow-up — see SDD §5.4.
     """
     placeholders: dict[str, str] = {}
     counters: dict[str, int] = {}

@@ -1,15 +1,72 @@
+# LOCAH.ai orchestration. Run with:
+#   docker compose up                  # All services (db, api, frontend)
+#   docker compose up db               # Database only
+#   docker compose up db api           # API + database
+#   docker compose up db frontend      # Frontend + database
+
 services:
+  # Database shared by all environments
   db:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: locah
       POSTGRES_PASSWORD: locah
       POSTGRES_DB: locah
-    ports: ["5432:5432"]
-    volumes: [pgdata:/var/lib/postgresql/data]
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U locah"]
       interval: 5s
       retries: 10
+    networks:
+      - locah-network
+
+  # Backend API
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - locah-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - BACKEND_URL=http://api:8000
+    env_file:
+      - ./frontend/.env
+    depends_on:
+      - api
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    command: pnpm run dev
+    networks:
+      - locah-network
+
 volumes:
   pgdata:
+
+networks:
+  locah-network:
+    driver: bridge
