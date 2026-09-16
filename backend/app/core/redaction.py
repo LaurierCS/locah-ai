@@ -43,7 +43,8 @@ def redact(text: str) -> Redaction:
     """Replace identifying values with stable placeholders.
 
     Regexes cover structured identifiers (email, phone, student number, postal
-    code). A named-entity pass for person names is a follow-up — see SDD §5.4.
+    code). A named-entity pass for person names is an S3 deliverable (see #13);
+    until then, names may be missed by regex alone.
     """
     placeholders: dict[str, str] = {}
     counters: dict[str, int] = {}

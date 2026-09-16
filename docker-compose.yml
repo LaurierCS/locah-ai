@@ -34,6 +34,7 @@ services:
       - PYTHONUNBUFFERED=1
     env_file:
       - ./backend/.env
+    env_file_override: false
     depends_on:
       db:
         condition: service_healthy
@@ -54,6 +55,7 @@ services:
       - BACKEND_URL=http://api:8000
     env_file:
       - ./frontend/.env
+    env_file_override: false
     depends_on:
       - api
     volumes:
