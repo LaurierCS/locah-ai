@@ -117,11 +117,16 @@ These are enforced in code and verified by tests. Each has an owning test file.
 │   │   └── analytics/        # question logging, clustering, reports
 │   ├── alembic.ini
 │   ├── migrations/           # Alembic env + versions
+│   ├── Dockerfile            # Python 3.14, uv, runs migrations
 │   ├── pyproject.toml        # uv project
+│   ├── uv.lock               # frozen dependency lock
 │   └── tests/
 ├── frontend/                 # Next.js (App Router) + Tailwind; pnpm
+│   ├── Dockerfile            # Node 24, pnpm, dev server
+│   └── pnpm-lock.yaml        # frozen dependency lock
 ├── eval/                     # gold set + scoring harness (S3)
-└── docker-compose.yml        # Postgres + pgvector only
+├── docker-compose.yml        # Postgres, API, frontend orchestration
+└── DOCKER_COMPOSE.md         # Deployment and orchestration guide
 ```
 
 ### 4.3 Team decomposition (~10 volunteers, 5 pods)
@@ -190,7 +195,7 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 ### 5.4 Safety & redaction
 
 **Redaction** (`core/redaction.py`) — **[INV-2]**
-- Regex + validated patterns for: Laurier student numbers, emails, phone numbers, postal codes. A named-entity pass for person names is a follow-up if regex misses too much.
+- Regex + validated patterns for: Laurier student numbers, emails, phone numbers, postal codes. A named-entity pass for person names is an S3 deliverable (see #13); until then, names may be missed by regex alone.
 - Replaces with stable placeholders (`⟨PERSON_1⟩`) held in an in-request map; restored locally on the way out. The map is never written to storage.
 
 **Safety gate** (`core/safety.py`) — **[INV-5]**
@@ -340,7 +345,7 @@ CI runs lint, typecheck, and unit tests on every PR. A 40-question eval smoke su
 
 | Environment | Stack | Trigger |
 |---|---|---|
-| Local | `docker compose up -d db` (Postgres+pgvector); API via `uv`; Next via `pnpm` | manual |
+| Local | `docker compose up` (db, API, frontend in Docker) or mix-and-match with native uv/pnpm | manual |
 | Staging | Backend on Railway/Fly.io, frontend on Vercel, Neon/Supabase Postgres | push to `main` |
 | Production | Same, separate project + database | tagged release |
 

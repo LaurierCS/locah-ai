@@ -54,8 +54,6 @@ pnpm install
 pnpm run dev
 ```
 
-Backend on http://localhost:8000, frontend on http://localhost:3000.
-
 Backend on `:8000`, frontend on `:3000`. Health check: [http://localhost:8000/api/v1/health](http://localhost:8000/api/v1/health).
 
 ## Stack
