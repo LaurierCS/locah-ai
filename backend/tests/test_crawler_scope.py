@@ -4,12 +4,12 @@ import pytest
 
 from app.core.config import settings
 
-pytestmark = pytest.mark.skip(reason="Implement alongside the crawler in S1 — SDD §5.1")
 
-
+@pytest.mark.skip(reason="Implement alongside the crawler in S1 — SDD §5.1")
 def test_offsite_url_is_rejected() -> None: ...
 
 
+@pytest.mark.skip(reason="Implement alongside the crawler in S1 — SDD §5.1")
 def test_robots_disallow_is_respected() -> None: ...
 
 
