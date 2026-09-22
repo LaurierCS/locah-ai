@@ -25,6 +25,10 @@ jobs:
         with:
           python-version: "3.14"
       - run: uv sync --frozen
+      - name: Run Migrations
+        run: uv run alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+psycopg://locah:locah@localhost:5432/locah
       - name: Lint
         run: uv run ruff check . && uv run ruff format --check .
       - name: Typecheck
