@@ -4,13 +4,12 @@ import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import ClassVar
-from urllib.parse import urljoin, urlparse
+from datetime import datetime, timezone
+from typing import Self
+from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -95,7 +94,7 @@ class CrawlerState:
         self.all_fetched: set[str] = set()
         self.results: list[CrawlResult] = []
 
-    async def __aenter__(self) -> "CrawlerState":
+    async def __aenter__(self) -> Self:
         self.http_client = httpx.AsyncClient(
             timeout=30.0,
             headers={"User-Agent": self.config.user_agent},
@@ -132,7 +131,7 @@ class CrawlerState:
             if query:
                 normalized += f"?{query}"
             return normalized
-        except Exception as e:
+        except (ValueError, AttributeError, TypeError) as e:
             logger.warning(f"Failed to parse URL {url}: {e}")
             return None
 
@@ -149,7 +148,7 @@ class CrawlerState:
             resp = await self.http_client.get(robot_url)
             parser.parse(resp.text.splitlines())
             logger.debug(f"Fetched robots.txt for {host}")
-        except Exception as e:
+        except (httpx.RequestError, RuntimeError) as e:
             logger.warning(f"Failed to fetch robots.txt for {host}: {e}")
             # If robots.txt is unavailable, assume no restrictions
         finally:
@@ -215,9 +214,6 @@ class CrawlerState:
         except httpx.RequestError as e:
             logger.error(f"Request error for {url}: {e}")
             return "", "", 0, None
-        except Exception as e:
-            logger.error(f"Unexpected error fetching {url}: {e}")
-            return "", "", 0, None
 
     async def extract_links(self, url: str, content: str, depth: int) -> list[str]:
         """Extract internal links from HTML content."""
@@ -257,7 +253,7 @@ class CrawlerState:
             async with queue.semaphore:
                 # Rate limiting: ≥1s delay per host
                 if queue.last_fetch_time:
-                    elapsed = (datetime.now() - queue.last_fetch_time).total_seconds()
+                    elapsed = (datetime.now(timezone.utc) - queue.last_fetch_time).total_seconds()
                     if elapsed < self.config.delay_seconds:
                         await asyncio.sleep(self.config.delay_seconds - elapsed)
 
@@ -270,9 +266,9 @@ class CrawlerState:
                     continue
 
                 # Fetch and hash
-                content, content_hash, http_status, etag = await self.fetch_and_hash(url)
+                content, content_hash, http_status, _etag = await self.fetch_and_hash(url)
 
-                queue.last_fetch_time = datetime.now()
+                queue.last_fetch_time = datetime.now(timezone.utc)
                 queue.fetched.add(url)
                 self.all_fetched.add(url)
 
@@ -402,10 +398,10 @@ async def persist_crawl_results(
                     "url": result.url,
                     "content_hash": result.content_hash,
                     "http_status": result.http_status,
-                    "fetched_at": datetime.utcnow(),
+                    "fetched_at": datetime.now(timezone.utc),
                 },
             )
-        except Exception as e:
+        except (ValueError, RuntimeError) as e:
             logger.error(f"Failed to persist {result.url}: {e}")
 
     await session.commit()
