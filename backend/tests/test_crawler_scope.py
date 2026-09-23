@@ -1,6 +1,6 @@
 """INV-1: the knowledge base holds public wlu.ca pages only."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
