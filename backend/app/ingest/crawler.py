@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Self
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
@@ -253,7 +253,7 @@ class CrawlerState:
             async with queue.semaphore:
                 # Rate limiting: ≥1s delay per host
                 if queue.last_fetch_time:
-                    elapsed = (datetime.now(timezone.utc) - queue.last_fetch_time).total_seconds()
+                    elapsed = (datetime.now(UTC) - queue.last_fetch_time).total_seconds()
                     if elapsed < self.config.delay_seconds:
                         await asyncio.sleep(self.config.delay_seconds - elapsed)
 
@@ -268,7 +268,7 @@ class CrawlerState:
                 # Fetch and hash
                 content, content_hash, http_status, _etag = await self.fetch_and_hash(url)
 
-                queue.last_fetch_time = datetime.now(timezone.utc)
+                queue.last_fetch_time = datetime.now(UTC)
                 queue.fetched.add(url)
                 self.all_fetched.add(url)
 
@@ -398,7 +398,7 @@ async def persist_crawl_results(
                     "url": result.url,
                     "content_hash": result.content_hash,
                     "http_status": result.http_status,
-                    "fetched_at": datetime.now(timezone.utc),
+                    "fetched_at": datetime.now(UTC),
                 },
             )
         except (ValueError, RuntimeError) as e:
