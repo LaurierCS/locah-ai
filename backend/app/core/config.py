@@ -28,9 +28,11 @@ class Settings(BaseSettings):
 
     # INV-1: explicit public hostnames, not a bare *.wlu.ca wildcard.
     crawl_allowlist: str = "wlu.ca,www.wlu.ca,students.wlu.ca,legacy.wlu.ca"
-    crawl_user_agent: str = "LOCAH.ai (Laurier Computing Society)"
+    crawl_user_agent: str = "LOCAH.ai (Laurier Computing Society; development@lauriercs.org)"
     crawl_delay_seconds: float = 1.0
     crawl_max_pages: int = 5000
+    crawl_depth_cap: int = 2
+    crawl_content_types: str = "text/html,application/pdf"
 
     retrieval_top_k: int = 8
     confidence_threshold: float = 0.35
@@ -44,6 +46,10 @@ class Settings(BaseSettings):
     @property
     def allowed_hosts(self) -> set[str]:
         return {h.strip().lower() for h in self.crawl_allowlist.split(",") if h.strip()}
+
+    @property
+    def crawl_content_types_list(self) -> list[str]:
+        return [ct.strip() for ct in self.crawl_content_types.split(",") if ct.strip()]
 
 
 settings = Settings()
