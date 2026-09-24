@@ -29,7 +29,7 @@ include = ["app*"]
 dev = [
   "pytest>=8.4",
   "pytest-asyncio>=1.1",
-  "ruff>=0.13",
+  "ruff>=0.16.8",
   "mypy>=1.17",
   "respx>=0.22",
 ]
