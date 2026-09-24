@@ -7,7 +7,7 @@ dependencies = [
   "uvicorn[standard]>=0.53.0",
   "pydantic>=2.11",
   "pydantic-settings>=2.10",
-  "sqlalchemy>=2.0",
+  "sqlalchemy>=2.0.54",
   "psycopg[binary]>=3.3.5",
   "pgvector>=0.4",
   "alembic>=1.16",
@@ -29,7 +29,7 @@ include = ["app*"]
 dev = [
   "pytest>=8.4",
   "pytest-asyncio>=1.1",
-  "ruff>=0.13",
+  "ruff>=0.16.8",
   "mypy>=1.17",
   "respx>=0.22",
 ]
