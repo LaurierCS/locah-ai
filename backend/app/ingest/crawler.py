@@ -13,40 +13,9 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.ingest.seeds import load_seeds
 
 logger = logging.getLogger(__name__)
-
-
-# TODO(#36): Replace with external seed config loader once issue #36 is complete
-# These are placeholder seed URLs for the 8 domain areas from SDD §5.1.
-# Issue #36 will implement a proper seeds.yaml loader and test suite.
-SEED_URLS: dict[str, list[str]] = {
-    "advising": [
-        "https://www.wlu.ca/student-advising",
-        "https://www.wlu.ca/student-advising/contacts",
-    ],
-    "academic_calendar": [
-        "https://www.wlu.ca/student-services/academic-calendar",
-    ],
-    "coop": [
-        "https://www.wlu.ca/co-op",
-    ],
-    "important_dates": [
-        "https://www.wlu.ca/important-dates",
-    ],
-    "registrar": [
-        "https://www.wlu.ca/registrar",
-    ],
-    "wellness": [
-        "https://www.wlu.ca/student-services/wellness",
-    ],
-    "accessible_learning": [
-        "https://www.wlu.ca/student-services/accessible-learning",
-    ],
-    "financial_aid": [
-        "https://www.wlu.ca/student-services/financial-aid",
-    ],
-}
 
 
 @dataclass
@@ -308,9 +277,10 @@ class CrawlerState:
         Concurrent across hosts, serial within a host.
         Persists documents to database.
         """
-        # Flatten and group seeds by host
+        # Flatten and group seeds by host.
+        # load_seeds() reads seeds.yaml and validates hostnames against CRAWL_ALLOWLIST.
         all_seeds: dict[str, list[str]] = {}
-        for domain_seeds in SEED_URLS.values():
+        for domain_seeds in load_seeds().values():
             for seed_url in domain_seeds:
                 parsed = urlparse(seed_url)
                 host = parsed.hostname or ""
