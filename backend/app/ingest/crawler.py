@@ -27,6 +27,8 @@ class CrawlResult:
     reason: str | None = None  # skip/error reason
     http_status: int | None = None
     content_hash: str | None = None
+    body: bytes | None = None
+    content_type: str | None = None
 
 
 @dataclass
@@ -141,12 +143,12 @@ class CrawlerState:
 
     async def fetch_and_hash(
         self, url: str, etag: str | None = None
-    ) -> tuple[str, str, int, str | None]:
+    ) -> tuple[bytes, str, int, str | None, str]:
         """
         Fetch URL, compute content hash, handle etag.
 
-        Returns (content, content_hash, http_status, new_etag).
-        Content is empty if unchanged (304) or fetch failed.
+        Returns (body, content_hash, http_status, new_etag, content_type).
+        Body is empty if unchanged (304) or fetch failed.
         """
         if self.http_client is None:
             raise RuntimeError("HTTP client not initialized")
@@ -161,34 +163,40 @@ class CrawlerState:
             # 304 Not Modified — content unchanged
             if resp.status_code == 304:
                 logger.debug(f"304 Not Modified for {url}")
-                return "", hashlib.sha256(b"").hexdigest(), 304, etag
+                return b"", hashlib.sha256(b"").hexdigest(), 304, etag, ""
 
             # Check content-type
             content_type = resp.headers.get("content-type", "").lower()
             if not any(ct in content_type for ct in self.config.content_types):
                 logger.warning(f"Content-type not accepted for {url}: {content_type}")
-                return "", "", resp.status_code, None
+                return b"", "", resp.status_code, None, content_type
 
-            # Success: compute hash
-            content = resp.text
-            content_hash = hashlib.sha256(content.encode()).hexdigest()
+            # Hash raw bytes so PDFs and HTML stay consistent with stored etag/hash logic.
+            body = resp.content
+            content_hash = hashlib.sha256(body).hexdigest()
             new_etag = resp.headers.get("etag")
 
             logger.debug(f"Fetched {url} — hash {content_hash[:8]}..., status {resp.status_code}")
-            return content, content_hash, resp.status_code, new_etag
+            return body, content_hash, resp.status_code, new_etag, content_type
 
         except httpx.TimeoutException:
             logger.error(f"Timeout fetching {url}")
-            return "", "", 0, None
+            return b"", "", 0, None, ""
         except httpx.RequestError as e:
             logger.error(f"Request error for {url}: {e}")
-            return "", "", 0, None
+            return b"", "", 0, None, ""
 
-    async def extract_links(self, url: str, content: str, depth: int) -> list[str]:
+    async def extract_links(
+        self, url: str, body: bytes, content_type: str, depth: int
+    ) -> list[str]:
         """Extract internal links from HTML content."""
         links = []
-        if not content or depth >= self.config.depth_cap:
+        if not body or depth >= self.config.depth_cap:
             return links
+        if "text/html" not in content_type.lower():
+            return links
+
+        content = body.decode("utf-8", errors="replace")
 
         # Simple regex-based link extraction (trafilatura is for extraction, not link parsing)
         import re
@@ -235,7 +243,9 @@ class CrawlerState:
                     continue
 
                 # Fetch and hash
-                content, content_hash, http_status, _etag = await self.fetch_and_hash(url)
+                body, content_hash, http_status, _etag, content_type = await self.fetch_and_hash(
+                    url
+                )
 
                 queue.last_fetch_time = datetime.now(UTC)
                 queue.fetched.add(url)
@@ -249,6 +259,8 @@ class CrawlerState:
                             "success",
                             http_status=http_status,
                             content_hash=content_hash,
+                            body=body if http_status == 200 and body else None,
+                            content_type=content_type or None,
                         )
                     )
                 else:
@@ -262,7 +274,7 @@ class CrawlerState:
                     )
 
                 # Extract and enqueue new links
-                new_links = await self.extract_links(url, content, depth)
+                new_links = await self.extract_links(url, body, content_type, depth)
                 for link in new_links:
                     if link not in self.all_fetched and link not in [u for u, _ in queue.urls]:
                         queue.urls.append((link, depth + 1))
