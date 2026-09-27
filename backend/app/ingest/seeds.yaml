@@ -1,0 +1,50 @@
+# =============================================================================
+# Crawl seed URLs — SDD §5.1 domain areas
+#
+# !! DO NOT CRAWL !!
+# Crawling must not begin until issue #1 (Confirm ICT contact and crawl
+# posture before any crawling) has been resolved and signed off.
+# https://github.com/LaurierCS/locah-ai/issues/1
+# =============================================================================
+#
+# Rules for adding URLs:
+#   - All hostnames must appear in CRAWL_ALLOWLIST (see app/core/config.py).
+#     Allowed hosts (default): wlu.ca, www.wlu.ca, students.wlu.ca, legacy.wlu.ca
+#   - The loader (app/ingest/seeds.py) rejects any hostname not on that list.
+#   - Add ≥1 URL per domain area; more is fine.
+#   - Keep one domain area per YAML key; do not merge areas.
+
+seeds:
+
+  # Student advising — navigating academic/program concerns
+  advising:
+    - https://www.wlu.ca/student-advising/index.html
+    - https://www.wlu.ca/student-advising/contacts.html
+
+  # Academic calendar — program requirements, course offerings
+  academic_calendar:
+    - https://www.wlu.ca/calendars/bba/2024-2025/index.html
+
+  # Co-op program — placements, eligibility, deadlines
+  coop:
+    - https://www.wlu.ca/co-op/index.html
+
+  # Important dates — registration, add/drop, exam periods
+  important_dates:
+    - https://www.wlu.ca/important-dates/index.html
+
+  # Registrar — transcripts, enrolment verification, graduation
+  registrar:
+    - https://www.wlu.ca/registrar/index.html
+
+  # Wellness — counselling, mental health, medical services
+  wellness:
+    - https://www.wlu.ca/student-services/student-wellness-centre/index.html
+
+  # Accessible learning — accommodations, documentation requirements
+  accessible_learning:
+    - https://www.wlu.ca/student-services/accessible-learning/index.html
+
+  # Financial aid — OSAP, bursaries, scholarships, awards
+  financial_aid:
+    - https://www.wlu.ca/student-services/financial-services/index.html
