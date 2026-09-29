@@ -6,11 +6,9 @@ from app.db import get_db
 
 health_router = APIRouter()
 
+
 @health_router.get("/health")
-async def health(
-    response: Response,
-    db: Session = Depends(get_db)
-) -> dict[str, object]:
+async def health(response: Response, db: Session = Depends(get_db)) -> dict[str, object]:
     """
     Liveness check and Knowledge Base freshness indicator.
     Returns 200 OK if DB is reachable, 503 Service Unavailable if not.
@@ -34,7 +32,4 @@ async def health(
     except Exception as e:
         # If database is unreachable or query fails, return 503 degraded
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-        return {
-            "status": "degraded",
-            "error": str(e)
-        }
+        return {"status": "degraded", "error": str(e)}
