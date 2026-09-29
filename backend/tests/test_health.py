@@ -57,7 +57,7 @@ def test_health_ok_mock(monkeypatch):
     mock_db = MockDB()
 
     # Override the dependency to return our mock session
-    app.dependency_overrides[get_db] = lambda: [mock_db]
+    app.dependency_overrides[get_db] = lambda: mock_db
 
     response = client.get("/api/v1/health")
     assert response.status_code == 200
