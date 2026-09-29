@@ -1,9 +1,9 @@
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.main import app
+
 from app.db import get_db
+from app.main import app
 
 client = TestClient(app)
 
@@ -13,16 +13,19 @@ TEST_DATABASE_URL = "postgresql+psycopg://user:pass@localhost:5432/test_db"
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(bind=engine)
 
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
         yield db
         db.close()
-    except Exception as e:
+    except RuntimeError as e:
         # Simulate DB failure in some tests
         raise RuntimeError(f"DB Connection Failed: {e}")
 
+
 app.dependency_overrides[get_db] = override_get_db
+
 
 def test_health_endpoint_structure():
     """Verify the endpoint exists and returns the correct JSON keys."""
@@ -36,16 +39,19 @@ def test_health_endpoint_structure():
     assert "status" in data
     assert data["status"] == "degraded"
 
+
 def test_health_ok_mock(monkeypatch):
     """
     Verify 200 OK when database queries return successfully.
     Using monkeypatch instead of mocker to avoid dependency on pytest-mock.
     """
+
     class MockDB:
         def execute(self, query):
             class Result:
                 def scalar(self):
                     return "2026-09-29T10:00:00Z"
+
             return Result()
 
     mock_db = MockDB()
@@ -60,8 +66,10 @@ def test_health_ok_mock(monkeypatch):
     assert "last_crawl_at" in data
     assert "active_documents" in data
 
+
 def test_health_degraded_mock(monkeypatch):
     """Verify 503 degraded when DB throws an exception."""
+
     class MockDB:
         def execute(self, query):
             raise RuntimeError("Connection refused")
