@@ -1,3 +1,4 @@
+import sqlalchemy.exc
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -8,7 +9,10 @@ health_router = APIRouter()
 
 
 @health_router.get("/health")
-async def health(response: Response, db: Session = Depends(get_db)) -> dict[str, object]:
+async def health(
+    response: Response,
+    db: Session = Depends(get_db),  # noqa: B008
+) -> dict[str, object]:
     """
     Liveness check and Knowledge Base freshness indicator.
     Returns 200 OK if DB is reachable, 503 Service Unavailable if not.
@@ -29,7 +33,7 @@ async def health(response: Response, db: Session = Depends(get_db)) -> dict[str,
             "active_documents": res_active_docs or 0,
         }
 
-    except Exception as e:
+    except (sqlalchemy.exc.SQLAlchemyError, RuntimeError) as e:
         # If database is unreachable or query fails, return 503 degraded
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {"status": "degraded", "error": str(e)}
