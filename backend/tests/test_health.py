@@ -18,9 +18,9 @@ def override_get_db():
         db = TestingSessionLocal()
         yield db
         db.close()
-    except Exception:
+    except Exception as e:
         # Simulate DB failure in some tests
-        raise Exception("DB Connection Failed")
+        raise RuntimeError(f"DB Connection Failed: {e}")
 
 app.dependency_overrides[get_db] = override_get_db
 
@@ -64,7 +64,7 @@ def test_health_degraded_mock(monkeypatch):
     """Verify 503 degraded when DB throws an exception."""
     class MockDB:
         def execute(self, query):
-            raise Exception("Connection refused")
+            raise RuntimeError("Connection refused")
 
     mock_db = MockDB()
 

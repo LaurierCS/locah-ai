@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
 from app.db import get_db
 
 health_router = APIRouter()
@@ -35,6 +36,5 @@ async def health(
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return {
             "status": "degraded",
-            "error": str(e) if True else "Database connection failed"
-            # In production, we might hide the error string, but for S1 dev we keep it.
+            "error": str(e)
         }
