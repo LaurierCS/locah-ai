@@ -11,7 +11,7 @@ from app.ingest.extract import extract_document
 def test_ingest_full_pipeline_html() -> None:
     """End-to-end: extract an HTML page, then chunk it."""
     # Create more substantial content so blocks won't be filtered as too small
-    substantial_text = ("The academic calendar is the official schedule for the university. " * 10)
+    substantial_text = "The academic calendar is the official schedule for the university. " * 10
     html = (
         "<html><head><title>Academic Calendar</title></head><body><main>"
         "<h1>Academic Calendar</h1>"
@@ -83,7 +83,9 @@ def test_ingest_pipeline_with_large_document() -> None:
     # For large documents, we should have multiple chunks
     total_tokens = count_tokens(doc.full_text)
     if total_tokens > 800:
-        assert len(chunks) > 1, f"Document has {total_tokens} tokens but only {len(chunks)} chunk(s)"
+        assert len(chunks) > 1, (
+            f"Document has {total_tokens} tokens but only {len(chunks)} chunk(s)"
+        )
 
     # All chunks should be coherent
     for chunk in chunks:

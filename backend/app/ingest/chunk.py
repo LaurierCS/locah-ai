@@ -38,13 +38,13 @@ def count_tokens(text: str) -> int:
     Approximates the cl100k_base (Claude/GPT) tokenizer:
       tokens ≈ words / 0.75
     This heuristic is stable across texts and avoids network calls.
-    
+
     When the embedding model is finalized (S2–S3), switch to:
       anthropic.Anthropic().messages.count_tokens(...)
     """
     if not text:
         return 0
-    
+
     # Split on whitespace and punctuation boundaries
     words = text.split()
     # Rough estimate: 0.75 words per token (typical for English prose with cl100k_base)
@@ -111,7 +111,9 @@ def _break_on_heading_boundaries(
 
     # Block is very large; attempt to break it intelligently.
     # (For S1, most pages won't hit this, but we keep it for robustness.)
-    sections: list[_ChunkSection] = [_ChunkSection(text, heading_path, anchor_id, char_start, char_end)]
+    sections: list[_ChunkSection] = [
+        _ChunkSection(text, heading_path, anchor_id, char_start, char_end)
+    ]
     return sections
 
 
@@ -162,7 +164,7 @@ def _chunk_section_recursive(
 
     for para_idx, para in enumerate(paragraphs):
         para_tokens = count_tokens(para)
-        
+
         # Account for the separator that will be added between paragraphs
         separator_tokens = 2 if current_chunk else 0
 

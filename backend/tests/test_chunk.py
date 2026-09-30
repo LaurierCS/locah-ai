@@ -12,10 +12,9 @@ Verifies:
 import pytest
 
 from app.ingest.chunk import (
-    Chunk,
-    TARGET_CHUNK_TOKENS,
     OVERLAP_TOKENS,
-    MIN_CHUNK_TOKENS,
+    TARGET_CHUNK_TOKENS,
+    Chunk,
     chunk_extracted_document,
     count_tokens,
 )
@@ -51,7 +50,7 @@ def test_chunk_empty_blocks() -> None:
 
 
 def test_chunk_single_small_block() -> None:
-    """A single small block (< MIN_CHUNK_TOKENS) is skipped."""
+    """A single small block (< 50 tokens) is skipped."""
     block_text = "Hello world"
     block = ExtractBlock(
         text=block_text,
@@ -93,10 +92,12 @@ def test_chunk_large_block_splits() -> None:
     """A large block is split into multiple chunks."""
     # Create a block with paragraphs that's larger than 2x target (~1600+ tokens)
     # Each paragraph is separated by \n\n
-    paragraph = "The registrar office handles all academic record matters and provides guidance for degree completion. " + \
-                "Students should consult the office for questions about transcripts, course substitutions, and academic standing. " + \
-                "Our staff works to support your success throughout your studies. " + \
-                "\n\n" * 1
+    paragraph = (
+        "The registrar office handles all academic record matters and provides guidance for degree completion. "
+        + "Students should consult the office for questions about transcripts, course substitutions, and academic standing. "
+        + "Our staff works to support your success throughout your studies. "
+        + "\n\n" * 1
+    )
     block_text = (paragraph * 30).rstrip()  # Create ~1500+ tokens of content
     block = ExtractBlock(
         text=block_text,
@@ -108,7 +109,9 @@ def test_chunk_large_block_splits() -> None:
     result = chunk_extracted_document(block_text, (block,))
 
     # Should produce multiple chunks
-    assert len(result) > 1, f"Expected multiple chunks, got {len(result)} with {count_tokens(block_text)} tokens"
+    assert len(result) > 1, (
+        f"Expected multiple chunks, got {len(result)} with {count_tokens(block_text)} tokens"
+    )
 
     # All chunks should have the correct heading and be non-empty
     for chunk in result:
@@ -294,7 +297,7 @@ def test_chunk_negative_token_count() -> None:
 
 
 def test_chunk_respects_min_chunk_tokens() -> None:
-    """Tiny blocks (< MIN_CHUNK_TOKENS) are discarded."""
+    """Tiny blocks (< 50 tokens) are discarded."""
     tiny_text = "a"
     block = ExtractBlock(
         text=tiny_text,
@@ -317,9 +320,7 @@ The registrar office manages all academic records and documents.
 Fees
 
 Tuition is charged per semester. Standard rates apply to full-time students.
-Graduate students may have different rates. """ + (
-        "Additional information about fees. " * 100
-    )
+Graduate students may have different rates. """ + ("Additional information about fees. " * 100)
 
     blocks = (
         ExtractBlock(
@@ -369,7 +370,9 @@ def test_chunk_size_distribution() -> None:
     )
     result = chunk_extracted_document(large_text, (block,))
 
-    assert len(result) > 1, f"Expected multiple chunks, got {len(result)} with {count_tokens(large_text)} tokens"
+    assert len(result) > 1, (
+        f"Expected multiple chunks, got {len(result)} with {count_tokens(large_text)} tokens"
+    )
 
     # Most chunks should be within a reasonable range of target
     for chunk in result:
