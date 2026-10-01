@@ -6,7 +6,7 @@ Turns Laurier's public web pages into an indexed, refreshable knowledge base.
 
 **Invariant you own: INV-1.** Only public Laurier pages enter the index. The hostname allowlist is `CRAWL_ALLOWLIST` in `app/core/config.py` (not a `*.wlu.ca` wildcard); `robots.txt` is respected without exception; the crawler identifies itself with a contact address.
 
-Embedding model is TBD in S1. Schema is `vector(1024)` until then.
+**Embedding model:** BAAI/bge-base-en-v1.5 (768-dimensional). See ADR-006 in SDD §13 for selection rationale: zero cost, strong retrieval quality, CPU-friendly for nightly batch processing.
 
 Spec: [SDD §5.1](../../../docs/SDD.md#51-ingest-pipeline) and [issue #6 (heading-aware chunker)](https://github.com/LaurierCS/locah-ai/issues/6)
 

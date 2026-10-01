@@ -164,8 +164,8 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 - Each chunk carries: `document_id`, `heading_path`, `char_range`, `url` (with `#anchor` when a heading id exists so citations deep-link).
 
 **Embedder** (`ingest/embed.py`)
-- Batched embedding calls; retry with exponential backoff; upsert into `chunks.embedding vector(N)`.
-- Model choice is a config value (`EMBEDDING_MODEL`), not a hardcode — see ADR-003. Dimension is `vector(1024)` until S1 picks a model; changing it is a new migration.
+- Batched embedding calls; retry with exponential backoff; upsert into `chunks.embedding vector(768)`.
+- Model: BAAI/bge-base-en-v1.5 (768-dimensional). See ADR-006 for selection rationale. Configuration via `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in `.env`.
 
 **Scheduling**: nightly full pass over high-churn seeds (dates, deadlines), weekly full crawl. A GitHub Actions cron triggers a backend job endpoint.
 
@@ -251,7 +251,7 @@ chunks(
   heading_path  text,
   text          text not null,
   token_count   int,
-  embedding     vector(1024),  -- EMBEDDING_MODEL TBD in S1; dim change = new migration
+  embedding     vector(768),  -- BAAI/bge-base-en-v1.5; see ADR-006
   tsv           tsvector generated,
   url_anchor    text
 );
@@ -389,6 +389,7 @@ Interviews with advisors and faculty run in parallel from week 1 — the proposa
 - **ADR-003 — Postgres + pgvector rather than a dedicated vector database.** One database for documents, embeddings, and analytics; free tier is sufficient at pilot scale; one fewer vendor account for a student club to hand over each year. Revisit above ~1M chunks.
 - **ADR-004 — Hybrid dense + sparse retrieval.** University pages are full of exact tokens (course codes, `CP104`, dates, GPA numbers) that dense retrieval alone handles poorly.
 - **ADR-005 — No user accounts in the MVP.** Accounts create a PII surface with no MVP benefit, and their absence is the structural enforcement of INV-3.
+- **ADR-006 — BAAI/bge-base-en-v1.5 as the embedding model.** Selected for zero cost (runs locally on CPU; embeddings are a fixed 2–5 minute batch cost per crawl, 1–2 weekly), excellent MTEB benchmark ranking, and CPU-friendly inference (~100–300ms per 32-chunk batch). No GPU needed; suitable for nightly batch processing on standard 4-core shared hosting. Open source, maintained by BAAI, no vendor lock-in. Output dimension is 768; we updated the schema from the initial vector(1024) placeholder to vector(768) to avoid storage overhead. Compared to API embeddings (Cohere ~$0.60–3/month, OpenAI ~$20–30/month), local execution preserves the full $60/month budget for LLM generation and hosting. Existing deployments run migration 002_update_embedding_dimension to alter the column; new deployments pick up the correct schema from 001_initial.
 
 ---
 
