@@ -42,8 +42,8 @@ def upgrade() -> None:
             text         text NOT NULL,
             token_count  int,
             url_anchor   text,
-            -- EMBEDDING_MODEL is TBD (S1). Changing this dimension needs a new migration.
-            embedding    vector(1024),
+            -- EMBEDDING_MODEL: BAAI/bge-base-en-v1.5 (768-dim). See ADR-006 in SDD §13.
+            embedding    vector(768),
             tsv          tsvector GENERATED ALWAYS AS (to_tsvector('english', text)) STORED
         )
         """

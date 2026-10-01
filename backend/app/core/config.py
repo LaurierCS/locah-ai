@@ -20,9 +20,9 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-5"
-    # Model ID is TBD until S1. Schema is vector(1024); a new model/dim needs a migration.
-    embedding_model: str = ""
-    embedding_dimensions: int = 1024
+    # BAAI/bge-base-en-v1.5 (768-dim). See ADR-006 in SDD §13.
+    embedding_model: str = "BAAI/bge-base-en-v1.5"
+    embedding_dimensions: int = 768
 
     database_url: str = "postgresql+psycopg://locah:locah@localhost:5432/locah"
 
