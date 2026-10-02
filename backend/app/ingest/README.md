@@ -82,3 +82,31 @@ chunks = chunk_extracted_document(doc.full_text, doc.blocks)
 - Every chunk's `token_count` matches the actual count of its `text`.
 - `char_start` and `char_end` are valid offsets into `doc.full_text`.
 - When retrieved for citations, a chunk's `text` contains the quoted passage and `url_anchor` points to the right section.
+
+## Embedder (`embed.py`)
+
+Turns chunks into dense vectors and upserts them into `chunks.embedding` (`vector(768)`).
+
+```python
+from app.ingest.embed import embed_document
+
+result = await embed_document(
+    session,                       # SQLAlchemy AsyncSession
+    document_id=doc_id,            # documents.id the chunks belong to
+    content_hash=doc.content_hash, # current fingerprint of the page
+    chunks=chunks,                 # list[Chunk] from the chunker
+)
+# EmbedResult(document_id=..., embedded=<n>, skipped=<bool>)
+```
+
+**Model:** [BAAI/bge-base-en-v1.5](https://huggingface.co/BAAI/bge-base-en-v1.5) (768-dim), run locally on CPU via [sentence-transformers](https://www.sbert.net/) — zero API cost, no key. Read from `settings.embedding_model` (`EMBEDDING_MODEL`). Embeddings are normalized so pgvector cosine distance (the HNSW `vector_cosine_ops` index) behaves as expected. See ADR-006 in [SDD §13](../../../docs/SDD.md).
+
+**Behaviour:**
+
+1. **Skip unchanged.** Each document carries `embedded_hash` (migration `003`), the `content_hash` as of its last successful embed. When it equals the current `content_hash`, `embed_document` returns `skipped=True` and does no work. Pass `force=True` to re-embed regardless.
+2. **Batched calls with backoff.** Text is embedded in batches (default 32); each batch retries on failure with exponential backoff (`backoff_base * 2**attempt`).
+3. **Upsert + cleanup.** Chunk rows are upserted by `(document_id, ordinal)`; if a re-embed produces fewer chunks than before, now-excess rows are deleted. On success, `embedded_hash` is advanced to `content_hash` and the transaction is committed.
+
+**Testing:** the embedding model is injectable (`encoder=`), so unit tests pass a mock and CI needs neither a model download nor a live database. See `tests/test_embedder.py`. The lower-level `embed_texts(texts, encoder=...)` exposes just the batching + backoff core.
+
+> Note: nothing writes `chunks` rows before this stage — `embed_document` is where chunks are first persisted. Wiring crawl → extract → chunk → embed into one run is the orchestrator's job (#37).
