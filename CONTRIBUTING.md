@@ -17,6 +17,7 @@
 
 - Backend: `uv sync` then `uv run pytest`, `uv run ruff check .`, `uv run mypy`.
 - Frontend: `pnpm install` then `pnpm run lint`, `pnpm run typecheck`.
+- Full ingest pipeline: `cd backend && uv run python -m app.ingest.run` (see [backend/app/ingest/README.md](backend/app/ingest/README.md)).
 - Schema changes: Alembic revision under `backend/migrations/versions/`. Apply with `uv run alembic upgrade head`.
 
 ## The rules that get PRs rejected

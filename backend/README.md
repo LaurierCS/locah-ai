@@ -65,7 +65,7 @@ Environment: `DATABASE_URL` in `.env` or `backend/.env`.
 - `app/main.py` — FastAPI app entry
 - `app/core/config.py` — Settings & environment
 - `app/core/redaction.py` — Privacy gate (INV-2)
-- `app/ingest/` — Crawler, extractor, chunker, embedder (SDD §5.1)
+- `app/ingest/` — Crawler, extractor, chunker, embedder, orchestrator (SDD §5.1). Run the full pipeline: `uv run python -m app.ingest.run`
 - `app/llm/` — Model provider integration
 - `app/api/` — API routes
 - `app/retrieval/` — Knowledge base retrieval
