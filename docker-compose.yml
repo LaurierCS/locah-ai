@@ -32,6 +32,8 @@ services:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      # Override host .env (localhost) so Alembic and the API reach Postgres on the compose network.
+      - DATABASE_URL=postgresql+psycopg://locah:locah@db:5432/locah
     env_file:
       - path: ./backend/.env
         required: false
@@ -40,6 +42,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      # Shadow backend/.venv so container uv sync does not create a root-owned dir on the host bind mount.
+      - api-venv:/app/.venv
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - locah-network
@@ -68,6 +72,7 @@ services:
 
 volumes:
   pgdata:
+  api-venv:
 
 networks:
   locah-network:
