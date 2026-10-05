@@ -320,13 +320,20 @@ class CrawlerState:
         )
 
 
-async def crawl(session: AsyncSession | None = None) -> None:
+async def crawl(session: AsyncSession | None = None) -> list[CrawlResult]:
     """
     Main entry point: crawl all seeds and persist to database.
+
+    Returns the full list of CrawlResults so callers (e.g. the orchestrator in
+    ``pipeline.run_ingest`` or the admin endpoint #38) can continue processing
+    without re-running the crawl.
 
     Args:
         session: Optional SQLAlchemy async session for persistence.
                  If None, crawler still runs but doesn't persist.
+
+    Returns:
+        List of CrawlResult for every URL visited (success, skip, or error).
     """
     config = CrawlerConfig(
         allowlist=settings.allowed_hosts,
@@ -343,6 +350,8 @@ async def crawl(session: AsyncSession | None = None) -> None:
         # Persist results if session available
         if session:
             await persist_crawl_results(session, crawler.results, crawler.robots_parsers)
+
+        return crawler.results
 
 
 async def persist_crawl_results(
