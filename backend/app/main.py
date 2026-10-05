@@ -3,13 +3,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import admin
 from app.core.config import settings
+from app.core.errors import ProblemError, problem_error_handler
 
 app = FastAPI(
     title="LOCAH.ai",
     description="An assistant over Wilfrid Laurier University's public information.",
     version="0.1.0",
 )
+
+app.add_exception_handler(ProblemError, problem_error_handler)
+app.include_router(admin.router)
 
 # CORS: allow the frontend and localhost development to access the API.
 app.add_middleware(
