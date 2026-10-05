@@ -91,10 +91,10 @@ Turns chunks into dense vectors and upserts them into `chunks.embedding` (`vecto
 from app.ingest.embed import embed_document
 
 result = await embed_document(
-    session,                       # SQLAlchemy AsyncSession
-    document_id=doc_id,            # documents.id the chunks belong to
-    content_hash=doc.content_hash, # current fingerprint of the page
-    chunks=chunks,                 # list[Chunk] from the chunker
+    session,  # SQLAlchemy AsyncSession
+    document_id=doc_id,  # documents.id the chunks belong to
+    content_hash=doc.content_hash,  # current fingerprint of the page
+    chunks=chunks,  # list[Chunk] from the chunker
 )
 # EmbedResult(document_id=..., embedded=<n>, skipped=<bool>)
 ```
