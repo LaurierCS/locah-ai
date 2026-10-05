@@ -6,9 +6,15 @@ Two layers:
   * `embed_texts`  — pure, synchronous core. Batches calls to the embedding
     model and retries with exponential backoff. The model is injectable so
     tests can pass a mock (no model download, no network in CI).
-  * `embed_document` — async. Skips re-embedding when the parent document's
-    `content_hash` is unchanged since the last successful embed, otherwise
-    embeds the chunks and upserts them into the `chunks` table.
+  * `embed_document` — async DB I/O around the sync embed core. Skips
+    re-embedding when the parent document's `content_hash` is unchanged since
+    the last successful embed, otherwise embeds the chunks and upserts them
+    into the `chunks` table.
+
+Call-site note: `embed_document` awaits only SQLAlchemy; it calls sync
+`embed_texts` inline (model encode + `time.sleep` on retry). That blocks the
+asyncio event loop for the duration. Intended for batch ingest (#37 worker/CLI),
+not for the FastAPI request loop — offload with `asyncio.to_thread` if needed.
 
 Model: BAAI/bge-base-en-v1.5 (768-dim), run locally via sentence-transformers.
 Read from `settings.embedding_model`. See ADR-006 in SDD §13.
@@ -184,6 +190,7 @@ async def embed_document(
             logger.info("Skipping %s — content_hash unchanged (%s)", document_id, content_hash[:8])
             return EmbedResult(document_id=document_id, embedded=0, skipped=True)
 
+    # Sync CPU + retry sleep; see module docstring before calling from async HTTP handlers.
     vectors = embed_texts(
         [c.text for c in chunks],
         encoder=encoder,
