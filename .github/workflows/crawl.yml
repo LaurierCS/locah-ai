@@ -1,0 +1,41 @@
+name: Crawl staging knowledge base
+
+on:
+  schedule:
+    - cron: '0 5 * * *' # Nightly high-churn pass, 05:00 UTC
+    - cron: '0 4 * * 0' # Weekly full pass, Sunday 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Crawl scope
+        required: true
+        type: choice
+        options:
+          - high_churn
+          - full
+        default: full
+
+permissions: {}
+
+jobs:
+  trigger-crawl:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      BACKEND_URL: ${{ secrets.BACKEND_URL }}
+      ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+      CRAWL_SCOPE: ${{ github.event_name == 'schedule' && github.event.schedule == '0 5 * * *' && 'high_churn' || inputs.scope || 'full' }}
+    steps:
+      - name: Request crawl
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${BACKEND_URL:?Set BACKEND_URL in the staging environment}"
+          : "${ADMIN_TOKEN:?Set ADMIN_TOKEN in the staging environment}"
+
+          curl --fail --silent --show-error --output /dev/null --max-time 30 \
+            --request POST \
+            --header "Authorization: Bearer ${ADMIN_TOKEN}" \
+            --header 'Content-Type: application/json' \
+            --data "{\"scope\":\"${CRAWL_SCOPE}\"}" \
+            "${BACKEND_URL%/}/api/v1/admin/crawl"
