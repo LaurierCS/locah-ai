@@ -20,6 +20,49 @@
 - Full ingest pipeline: `cd backend && uv run python -m app.ingest.run` (see [backend/app/ingest/README.md](backend/app/ingest/README.md)).
 - Schema changes: Alembic revision under `backend/migrations/versions/`. Apply with `uv run alembic upgrade head`.
 
+## Scheduled crawls
+
+The [crawl workflow](.github/workflows/crawl.yml) calls the staging backend's
+`POST /api/v1/admin/crawl` endpoint. Configure these secrets in the GitHub
+repository's **staging** environment before enabling scheduled or manual runs:
+
+- `BACKEND_URL` — public base URL of the staging backend, without `/api/v1`.
+- `ADMIN_TOKEN` — bearer token matching the staging backend's `ADMIN_TOKEN`.
+
+### Obtain and configure the values
+
+1. Deploy the backend to the staging service (the [deployment design](docs/SDD.md#10-deployment)
+   proposes Railway or Fly.io). Copy its **public HTTPS base URL** from that
+   service's dashboard, for example `https://api-staging.example.org`. Confirm
+   that `<base URL>/api/v1/health` responds. Use this base URL as `BACKEND_URL`;
+   a local address such as `localhost:8000` or Docker's `api:8000` is not
+   reachable from a GitHub-hosted runner. The repo does not currently record an
+   actual staging URL.
+2. Generate a random token on your own machine with
+   `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Set the
+   generated value as `ADMIN_TOKEN` in the **staging backend service's**
+   environment variables. Set the exact same value as the `ADMIN_TOKEN` secret
+   in GitHub's **staging** environment. Never add the value to this repo or a
+   documentation file. The backend's settings already read `ADMIN_TOKEN` from
+   the environment (`backend/app/core/config.py`).
+3. In the GitHub repository, open **Settings → Environments → staging →
+   Environment secrets** and add `BACKEND_URL` and `ADMIN_TOKEN`. The workflow
+   references the `staging` environment, so those secrets are available to its
+   job. Only a repository administrator can configure environment secrets for
+   an organization repository. See [GitHub's environment-secret instructions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#creating-secrets-for-an-environment).
+4. Issue #38 must add and deploy the `POST /api/v1/admin/crawl` route. It is a
+   URL path on the backend, not a third secret or a separate service. The route
+   needs to verify `Authorization: Bearer <ADMIN_TOKEN>`, accept `full` and
+   `high_churn` scopes, and return a 2xx response once the job is accepted.
+   You can check that the deployed route is documented in `<base URL>/openapi.json`
+   without starting a crawl. Do not run a crawl until issue #1's ICT signoff.
+
+In **Actions → Crawl staging knowledge base → Run workflow**, choose `full`
+or `high_churn` to start a manual pass. The workflow checks only whether the
+backend accepted the request; the crawl continues on the backend. A non-2xx
+response fails the workflow. The endpoint must support the request body
+`{"scope":"full"}` or `{"scope":"high_churn"}` (issue #38).
+
 ## The rules that get PRs rejected
 
 - Adding a code path by which the safety classifier can downrank, suppress, or auto-resolve anything (**INV-5**).

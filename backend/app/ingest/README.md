@@ -76,6 +76,16 @@ Successful HTTP 200 responses retain **`CrawlResult.body`** (raw bytes) and
 `crawl(session)` returns `list[CrawlResult]` so callers (the orchestrator, and
 the admin endpoint #38) can continue processing without re-running the crawl.
 
+## Scheduled crawls
+
+The [GitHub Actions workflow](../../../.github/workflows/crawl.yml) requests a
+`high_churn` crawl every night at **05:00 UTC** (`0 5 * * *`) for dates and
+deadlines. It requests a `full` crawl every Sunday at **04:00 UTC**
+(`0 4 * * 0`). The Actions tab also offers a manual choice of either scope.
+Each run sends `POST /api/v1/admin/crawl` with a bearer token and
+`{"scope":"high_churn"}` or `{"scope":"full"}`; it exits after the backend
+accepts the request. The endpoint and scope handling are tracked in issue #38.
+
 ## Extractor (`extract.py`)
 
 Strips boilerplate and turns raw bodies into structured sections for the chunker.
