@@ -164,8 +164,11 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 - Each chunk carries: `document_id`, `heading_path`, `char_range`, `url` (with `#anchor` when a heading id exists so citations deep-link).
 
 **Embedder** (`ingest/embed.py`)
-- Batched embedding calls; retry with exponential backoff; upsert into `chunks.embedding vector(768)`.
-- Model: BAAI/bge-base-en-v1.5 (768-dimensional). See ADR-006 for selection rationale. Configuration via `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in `.env`.
+- Batched embedding calls (default 32); retry with exponential backoff; upsert into `chunks.embedding vector(768)` by `(document_id, ordinal)`, clearing now-excess rows when a re-embed yields fewer chunks.
+- Model: BAAI/bge-base-en-v1.5 (768-dimensional), run locally on CPU via `sentence-transformers`; embeddings are normalized for pgvector cosine distance. See ADR-006 for selection rationale. Configuration via `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in `.env`.
+- Skips re-embedding when the parent document's `content_hash` is unchanged since its last embed. Because the crawler overwrites `documents.content_hash` on every fetch, the last-embedded fingerprint is tracked separately in `documents.embedded_hash` (migration `003`); the embedder skips when the two match and advances `embedded_hash` on success.
+- As the chunker only produces in-memory `Chunk` objects, the embedder is the stage that first persists chunk rows (text and metadata alongside the embedding). The orchestrator (#37) wires crawl → extract → chunk → embed into one run.
+- The embedding model is injectable, so unit tests run with a mock (no model download or live key in CI).
 
 **Scheduling**: nightly full pass over high-churn seeds (dates, deadlines), weekly full crawl. A GitHub Actions cron triggers a backend job endpoint.
 
@@ -237,6 +240,7 @@ documents(
   url           text unique not null,
   title         text,
   content_hash  text not null,
+  embedded_hash text,            -- content_hash as of last successful embed; NULL = never embedded
   etag          text,
   http_status   int,
   content_type  text,
