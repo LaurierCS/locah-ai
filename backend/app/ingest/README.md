@@ -62,6 +62,7 @@ If richer subcommands or `--help` output become a requirement, swap
 | `run_ingest(session)` | `pipeline.py` | End-to-end: crawl → persist → extract → chunk → embed |
 | `process_crawl_results(session, results)` | `pipeline.py` | Extract/chunk/embed a pre-crawled list |
 | `format_ingest_summary(summary)` | `pipeline.py` | Human-readable summary string |
+| `start_crawl_job()` | `jobs.py` | Runs `run_ingest` as a background job (one at a time); backs `POST /api/v1/admin/crawl` (see [API README](../api/README.md)) |
 
 Both functions accept an optional `encoder=` argument so integration tests can
 inject a mock model and run without a sentence-transformers download.
