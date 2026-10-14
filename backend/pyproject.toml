@@ -46,7 +46,7 @@ target-version = "py312"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["app/core", "app/llm"]
+files = ["app/core", "app/llm", "app/retrieval"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

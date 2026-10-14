@@ -134,12 +134,19 @@ def embed_texts(
     return vectors
 
 
-def _vector_literal(vec: list[float]) -> str:
+def vector_to_pg_literal(vec: Sequence[float]) -> str:
     """Format a vector as a pgvector string literal, e.g. "[0.1,0.2,0.3]".
 
     Passed as a bound string and cast with `CAST(:embedding AS vector)` so it
-    works regardless of pgvector's psycopg type registration."""
+    works regardless of pgvector's psycopg type registration. Shared with
+    retrieval query-time dense search (#7).
+    """
     return "[" + ",".join(str(float(x)) for x in vec) + "]"
+
+
+def _vector_literal(vec: list[float]) -> str:
+    """Backward-compatible alias; prefer vector_to_pg_literal."""
+    return vector_to_pg_literal(vec)
 
 
 _UPSERT_CHUNK_SQL = text(
@@ -209,7 +216,7 @@ async def embed_document(
                 "text": chunk.text,
                 "token_count": chunk.token_count,
                 "url_anchor": chunk.url_anchor,
-                "embedding": _vector_literal(vector),
+                "embedding": vector_to_pg_literal(vector),
             },
         )
 

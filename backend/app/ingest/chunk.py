@@ -23,6 +23,8 @@ import logging
 from dataclasses import dataclass
 from typing import NamedTuple
 
+from app.ingest.extract import ExtractBlock
+
 logger = logging.getLogger(__name__)
 
 # Token counting constants
@@ -236,7 +238,7 @@ def _compute_overlap(chunk_text: str) -> str:
     return "\n\n".join(overlap_parts)
 
 
-def chunk_extracted_document(doc_full_text: str, blocks: tuple) -> list[Chunk]:
+def chunk_extracted_document(doc_full_text: str, blocks: tuple[ExtractBlock, ...]) -> list[Chunk]:
     """
     Chunk an ExtractedDocument into citation-ready segments.
 
