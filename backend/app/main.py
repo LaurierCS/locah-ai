@@ -3,13 +3,18 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.core.config import settings
+from app.api import admin
+from app.api.health import health_router
+from app.core.errors import ProblemError, problem_error_handler
 
 app = FastAPI(
     title="LOCAH.ai",
     description="An assistant over Wilfrid Laurier University's public information.",
     version="0.1.0",
 )
+
+app.add_exception_handler(ProblemError, problem_error_handler)
+app.include_router(admin.router)
 
 # CORS: allow the frontend and localhost development to access the API.
 app.add_middleware(
@@ -25,13 +30,4 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/api/v1/health")
-async def health() -> dict[str, object]:
-    return {
-        "status": "ok",
-        "model": settings.anthropic_model,
-        # Populated once ingest (S1) writes crawl metadata. Keys match SDD §7.
-        "last_crawl_at": None,
-        "active_documents": None,
-    }
+app.include_router(health_router, prefix="/api/v1")
