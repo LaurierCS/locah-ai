@@ -151,6 +151,7 @@ def test_format_ingest_summary_contains_all_fields() -> None:
         chunks_upserted=42,
         skipped_unchanged=3,
         extract_skipped=1,
+        quality_rejected=2,
         errors=0,
     )
     output = format_ingest_summary(summary)
@@ -162,4 +163,6 @@ def test_format_ingest_summary_contains_all_fields() -> None:
     assert "Skipped unchanged" in output
     assert "3" in output
     assert "Extract skipped" in output
+    assert "Quality rejected" in output
+    assert "2" in output
     assert "Errors" in output

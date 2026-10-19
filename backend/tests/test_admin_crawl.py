@@ -107,6 +107,7 @@ async def test_valid_token_returns_202_and_runs_pipeline(
         "chunks_upserted": 12,
         "skipped_unchanged": 1,
         "extract_skipped": 0,
+        "quality_rejected": 0,
         "errors": 0,
     }
 
