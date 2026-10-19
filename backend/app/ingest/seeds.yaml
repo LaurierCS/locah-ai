@@ -1,50 +1,160 @@
 # =============================================================================
-# Crawl seed URLs — SDD §5.1 domain areas
+# Crawl seed URLs — SDD §5.1 (DRAFT for review — not committed)
 #
-# !! DO NOT CRAWL !!
-# Crawling must not begin until issue #1 (Confirm ICT contact and crawl
-# posture before any crawling) has been resolved and signed off.
-# https://github.com/LaurierCS/locah-ai/issues/1
+# Sources: students.wlu.ca + academic-calendar.wlu.ca (2025/26–2026/27).
+# Verify URLs in browser/curl before production crawl.
+# ICT / issue #1 sign-off still required per project policy.
+#
+# Path to ~2,000 chunks: academic-calendar faculty sections + depth 3–4 link crawl.
 # =============================================================================
-#
-# Rules for adding URLs:
-#   - All hostnames must appear in CRAWL_ALLOWLIST (see app/core/config.py).
-#     Allowed hosts (default): wlu.ca, www.wlu.ca, students.wlu.ca, legacy.wlu.ca
-#   - The loader (app/ingest/seeds.py) rejects any hostname not on that list.
-#   - Add ≥1 URL per domain area; more is fine.
-#   - Keep one domain area per YAML key; do not merge areas.
 
 seeds:
-
-  # Student advising — navigating academic/program concerns
+  # ---------------------------------------------------------------------------
+  # Student advising — hubs, faculty teams, probation/readmission, registration help
+  # ---------------------------------------------------------------------------
   advising:
-    - https://www.wlu.ca/student-advising/index.html
-    - https://www.wlu.ca/student-advising/contacts.html
+    # Hubs
+    - https://students.wlu.ca/home.html
+    - https://students.wlu.ca/academics/support-and-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/index.html
 
-  # Academic calendar — program requirements, course offerings
+    # Faculty / campus advising
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/arts-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/science-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/lazaridis-school-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/brantford-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/milton-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/education-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/music-advising/index.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/luther-advising/index.html
+
+    # Standing, probation, readmission
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/progressing-past-probation.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/strategies-for-academic-success.html
+    - https://students.wlu.ca/academics/records-and-registration/academic-standing-and-registration/index.html
+    - https://students.wlu.ca/academics/records-and-registration/academic-standing-and-registration/withdrawing-and-readmission.html
+
+    # Registration guide (advising-adjacent)
+    - https://students.wlu.ca/academics/records-and-registration/course-registration-guide/index.html
+    - https://students.wlu.ca/academics/records-and-registration/course-registration-guide/assets/resources/confirm-your-registration-date-and-time-ticket.html
+    - https://students.wlu.ca/academics/records-and-registration/course-registration-guide/assets/resources/transfer-credits-for-incoming-transfer-students.html
+    - https://students.wlu.ca/academics/support-and-advising/academic-advising/science-advising/assets/resources/faculty-of-science-registration-restrictions.html
+
+    # Enrolment front door
+    - https://students.wlu.ca/academics/records-and-registration/service-laurier.html
+    - https://students.wlu.ca/academics/support-and-advising/incoming-student-support/spring-start/index.html
+
+  # ---------------------------------------------------------------------------
+  # Academic calendar — official requirements, courses, regulations (primary chunk source)
+  # ---------------------------------------------------------------------------
   academic_calendar:
-    - https://www.wlu.ca/calendars/bba/2024-2025/index.html
+    # Calendar home + undergrad indexes
+    - https://academic-calendar.wlu.ca/
+    - https://academic-calendar.wlu.ca/index.php?cal=1&y=92
+    - https://academic-calendar.wlu.ca/index.php?cal=1&y=93
+    - https://academic-calendar.wlu.ca/section.php?cal=1&y=92
+    - https://academic-calendar.wlu.ca/section.php?cal=1&y=93
 
-  # Co-op program — placements, eligibility, deadlines
+    # How to use the calendar (students site)
+    - https://students.wlu.ca/academics/support-and-advising/calendars-and-petitions/academic-calendars/index.html
+
+    # University-wide regulations (progression, grades, petitions, graduation rules)
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1156&y=92
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1156&y=93
+
+    # Faculty chapter roots (2025/26 — link to programs + courses)
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1151&y=92 # Faculty of Arts
+    - https://academic-calendar.wlu.ca/department.php?cal=1&s=1151&y=92
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1152&y=92 # Faculty of Science
+    - https://academic-calendar.wlu.ca/department.php?cal=1&s=1152&y=92
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1154&y=92 # Lazaridis School
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1153&y=92 # Faculty of Liberal Arts (Brantford)
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1165&y=92 # Faculty of Human and Social Sciences
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1161&y=92 # Faculty of Education
+    - https://academic-calendar.wlu.ca/department.php?cal=1&d=3177&s=1161&y=92
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1164&y=92 # Martin Luther University College
+
+    # Same faculty roots — 2026/27 (y=93) where indexed
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1170&y=93 # Faculty of Science (2026/27)
+    - https://academic-calendar.wlu.ca/section.php?cal=1&s=1154&y=92 # Lazaridis (keep y=92 until y=93 section confirmed)
+
+    # Example high-traffic program pages (seed discovery; crawler should find more)
+    - https://academic-calendar.wlu.ca/program.php?cal=1&d=3132&p=7171&s=1152&y=92 # Honours BSc Science
+    - https://academic-calendar.wlu.ca/program.php?cal=1&d=3177&p=7270&s=1161&y=92 # BEd
+
+    # Academic dates inside calendar (add/drop, exams, co-op dates)
+    - https://academic-calendar.wlu.ca/dates.php?cal=1&y=92
+    - https://academic-calendar.wlu.ca/dates.php?cal=1&t=456&y=92 # Winter 2026 12-week example
+
+  # ---------------------------------------------------------------------------
+  # Co-op — admissions, GPA, work terms, OSAP crossover
+  # ---------------------------------------------------------------------------
   coop:
-    - https://www.wlu.ca/co-op/index.html
+    - https://students.wlu.ca/career-and-experiential-learning/index.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/index.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/programs/index.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/applying-to-co-op/index.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/applying-to-co-op/admission-requirements.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/applying-to-co-op/co-op-application-faqs.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/assets/resources/grade-requirements/business-and-economics-grade-requirements.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/assets/resources/grade-requirements/computer-science-grade-requirements.html
+    - https://students.wlu.ca/career-and-experiential-learning/co-op/assets/resources/grade-requirements/faculty-of-science-co-op-grade-requirements.html
+    - https://students.wlu.ca/finances/financial-aid/assets/resources/co-op-students.html
+    - https://students.wlu.ca/career-and-experiential-learning/experience-record/curricular-experiences.html
 
-  # Important dates — registration, add/drop, exam periods
+  # ---------------------------------------------------------------------------
+  # Important dates — term timelines (students site + calendar)
+  # ---------------------------------------------------------------------------
   important_dates:
-    - https://www.wlu.ca/important-dates/index.html
+    - https://students.wlu.ca/academics/support-and-advising/calendars-and-petitions/important-dates-and-deadlines.html
+    - https://academic-calendar.wlu.ca/dates.php?cal=1&y=92
+    - https://academic-calendar.wlu.ca/dates.php?cal=1&t=456&y=92
 
-  # Registrar — transcripts, enrolment verification, graduation
+  # ---------------------------------------------------------------------------
+  # Registrar / records — transcripts, LOP, graduation, convocation
+  # ---------------------------------------------------------------------------
   registrar:
-    - https://www.wlu.ca/registrar/index.html
+    - https://students.wlu.ca/academics/records-and-registration/index.html
+    - https://students.wlu.ca/academics/records-and-registration/student-records/index.html
+    - https://students.wlu.ca/academics/records-and-registration/academic-standing-and-registration/alternative-registration-procedures/taking-courses-at-another-university.html
+    - https://students.wlu.ca/academics/support-and-advising/calendars-and-petitions/petitions-and-appeals/index.html
+    - https://students.wlu.ca/academics/convocation/index.html
+    - https://students.wlu.ca/academics/convocation/apply-to-graduate.html
+    - https://students.wlu.ca/academics/convocation/prepare-for-convocation.html
+    - https://students.wlu.ca/academics/convocation/guests.html
+    - https://students.wlu.ca/academics/convocation/assets/resources/tickets.html
 
-  # Wellness — counselling, mental health, medical services
+  # ---------------------------------------------------------------------------
+  # Wellness — SWC services, crisis / after-hours (INV-5 relevant resources)
+  # ---------------------------------------------------------------------------
   wellness:
-    - https://www.wlu.ca/student-services/student-wellness-centre/index.html
+    - https://students.wlu.ca/support-and-wellness/student-wellness-centre/index.html
+    - https://students.wlu.ca/support-and-wellness/student-wellness-centre/services/index.html
+    - https://students.wlu.ca/support-and-wellness/student-wellness-centre/mental-health-resources/index.html
+    - https://students.wlu.ca/support-and-wellness/student-wellness-centre/urgent-care.html
+    - https://students.wlu.ca/support-and-wellness/student-wellness-centre/news/recurring/here-for-your-health-what-incoming-students-should-know-about-the-student-wellness-centre.html
+    - https://students.wlu.ca/support-and-wellness/student-wellness-centre/news/recurring/off-campus-counselling-resources.html
 
-  # Accessible learning — accommodations, documentation requirements
+  # ---------------------------------------------------------------------------
+  # Accessible learning — registration, documentation, accommodations
+  # ---------------------------------------------------------------------------
   accessible_learning:
-    - https://www.wlu.ca/student-services/accessible-learning/index.html
+    - https://students.wlu.ca/academics/support-and-advising/accessible-learning/
+    - https://students.wlu.ca/academics/support-and-advising/accessible-learning/registration/step-1-registration-and-documentation.html
+    - https://students.wlu.ca/academics/support-and-advising/accessible-learning/registration/step-2-alc-consultant.html
 
-  # Financial aid — OSAP, bursaries, scholarships, awards
+  # ---------------------------------------------------------------------------
+  # Financial aid — OSAP, bursaries, scholarships, tuition (student-facing)
+  # ---------------------------------------------------------------------------
   financial_aid:
-    - https://www.wlu.ca/student-services/financial-services/index.html
+    - https://students.wlu.ca/finances/financial-aid/index.html
+    - https://students.wlu.ca/finances/financial-aid/osap/index.html
+    - https://students.wlu.ca/finances/scholarships-and-bursaries/index.html
+    - https://students.wlu.ca/finances/scholarships-and-bursaries/scholarships-and-awards/index.html
+    - https://students.wlu.ca/finances/scholarships-and-bursaries/bursaries/index.html
+    - https://students.wlu.ca/finances/scholarships-and-bursaries/applications.html
+    - https://students.wlu.ca/finances/tuition-and-fees/index.html
+    - https://students.wlu.ca/finances/tuition-and-fees/payments/index.html
+    - https://students.wlu.ca/finances/tuition-and-fees/invoicing-and-accounts/index.html
+    - https://students.wlu.ca/finances/tuition-and-fees/fees-breakdown/index.html
