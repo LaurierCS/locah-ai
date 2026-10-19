@@ -75,10 +75,7 @@ def is_usable_extracted_text(text: str) -> bool:
         return False
 
     boilerplate_hits = sum(1 for p in _BOILERPLATE_PATTERNS if p.search(text))
-    if boilerplate_hits > _MAX_BOILERPLATE_MATCHES:
-        return False
-
-    return True
+    return boilerplate_hits <= _MAX_BOILERPLATE_MATCHES
 
 
 async def deactivate_document(session: AsyncSession, url: str) -> None:
@@ -97,9 +94,7 @@ async def deactivate_document(session: AsyncSession, url: str) -> None:
     delete_chunks = text(
         "DELETE FROM chunks WHERE document_id = (SELECT id FROM documents WHERE url = :url)"
     )
-    deactivate = text(
-        "UPDATE documents SET is_active = FALSE WHERE url = :url"
-    )
+    deactivate = text("UPDATE documents SET is_active = FALSE WHERE url = :url")
     await session.execute(delete_chunks, {"url": url})
     await session.execute(deactivate, {"url": url})
     # Caller is responsible for committing; this keeps the helper composable

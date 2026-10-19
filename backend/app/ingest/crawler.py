@@ -266,9 +266,14 @@ class CrawlerState:
                     continue
 
                 # Fetch and hash
-                body, content_hash, http_status, _etag, content_type, final_url = (
-                    await self.fetch_and_hash(url)
-                )
+                (
+                    body,
+                    content_hash,
+                    http_status,
+                    _etag,
+                    content_type,
+                    final_url,
+                ) = await self.fetch_and_hash(url)
 
                 queue.last_fetch_time = datetime.now(UTC)
                 queue.fetched.add(url)
@@ -279,8 +284,9 @@ class CrawlerState:
                 if is_error_document_url(final_url):
                     logger.warning(f"Error page after redirect for {url} → {final_url}")
                     host_results.append(
-                        CrawlResult(url, "skip", reason="redirected to error page",
-                                    final_url=final_url)
+                        CrawlResult(
+                            url, "skip", reason="redirected to error page", final_url=final_url
+                        )
                     )
                     # Still extract links from the original body if any were fetched,
                     # but in practice error pages have no useful onward links.

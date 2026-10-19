@@ -1,7 +1,5 @@
 """Unit tests for content_quality — pure function and DB helper."""
 
-import pytest
-
 from app.ingest.content_quality import is_usable_extracted_text
 
 

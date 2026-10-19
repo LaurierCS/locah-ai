@@ -84,10 +84,7 @@ def is_crawlable_link(url: str) -> bool:
         return False
 
     # Reject static asset extensions (check path without query string).
-    if any(path.endswith(ext) for ext in _DENYLIST_EXTENSIONS):
-        return False
-
-    return True
+    return not any(path.endswith(ext) for ext in _DENYLIST_EXTENSIONS)
 
 
 def is_error_document_url(url: str) -> bool:
@@ -113,10 +110,7 @@ def is_error_document_url(url: str) -> bool:
         return True
 
     # A ?req= param almost always means Laurier's 404 helper received a bad path.
-    if any(param in query for param in _ERROR_QUERY_PARAMS):
-        return True
-
-    return False
+    return any(param in query for param in _ERROR_QUERY_PARAMS)
 
 
 def is_persistable_fetch(
@@ -129,8 +123,4 @@ def is_persistable_fetch(
     Guards against persisting empty-body CSS/JS/304 results as document rows
     that later inflate the `documents` table with no corresponding chunks.
     """
-    return (
-        http_status == 200
-        and bool(body)
-        and bool(content_hash)
-    )
+    return http_status == 200 and bool(body) and bool(content_hash)

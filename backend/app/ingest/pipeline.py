@@ -115,9 +115,7 @@ async def process_crawl_results(
             # already exists from persist_crawl_results; deactivate_document marks
             # it is_active=False and removes its chunks so it never surfaces in search.
             if not is_usable_extracted_text(extracted.full_text):
-                logger.warning(
-                    "Quality gate rejected %s — content too thin or boilerplate", url
-                )
+                logger.warning("Quality gate rejected %s — content too thin or boilerplate", url)
                 await deactivate_document(session, url)
                 await session.commit()
                 summary.quality_rejected += 1

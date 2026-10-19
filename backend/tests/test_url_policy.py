@@ -1,9 +1,6 @@
 """Unit tests for url_policy — pure functions, no network, no DB."""
 
-import pytest
-
 from app.ingest.url_policy import is_crawlable_link, is_error_document_url, is_persistable_fetch
-
 
 # ---------------------------------------------------------------------------
 # is_crawlable_link
@@ -15,9 +12,7 @@ class TestIsCrawlableLink:
         assert is_crawlable_link("https://students.wlu.ca/academics/advising/index.html")
 
     def test_academic_calendar_allowed(self) -> None:
-        assert is_crawlable_link(
-            "https://academic-calendar.wlu.ca/section.php?cal=1&s=1156&y=92"
-        )
+        assert is_crawlable_link("https://academic-calendar.wlu.ca/section.php?cal=1&s=1156&y=92")
 
     def test_css_rejected(self) -> None:
         assert not is_crawlable_link("https://www.wlu.ca/_ato/dist/css/ato.min.css?v=3")

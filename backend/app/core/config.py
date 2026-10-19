@@ -28,7 +28,9 @@ class Settings(BaseSettings):
 
     # INV-1: explicit public hostnames, not a bare *.wlu.ca wildcard.
     # academic-calendar.wlu.ca is required for program/course/regulation content.
-    crawl_allowlist: str = "wlu.ca,www.wlu.ca,students.wlu.ca,legacy.wlu.ca,students.wlu.ca,academic-calendar.wlu.ca"
+    crawl_allowlist: str = (
+        "wlu.ca,www.wlu.ca,students.wlu.ca,legacy.wlu.ca,academic-calendar.wlu.ca"
+    )
     crawl_user_agent: str = "LOCAH.ai (Laurier Computing Society; development@lauriercs.org)"
     crawl_delay_seconds: float = 1.0
     crawl_max_pages: int = 5000
