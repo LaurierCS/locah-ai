@@ -11,6 +11,8 @@ from app.ingest.crawler import CrawlerConfig, CrawlerState
 def test_allowlist_is_configured() -> None:
     assert "wlu.ca" in settings.allowed_hosts
     assert "legacy.wlu.ca" in settings.allowed_hosts
+    assert "students.wlu.ca" in settings.allowed_hosts
+    assert "academic-calendar.wlu.ca" in settings.allowed_hosts
 
 
 def test_offsite_url_is_rejected() -> None:
@@ -36,6 +38,10 @@ def test_offsite_url_is_rejected() -> None:
     # Another allowlisted host
     result = crawler.normalize_url("https://legacy.wlu.ca/old-page")
     assert result == "https://legacy.wlu.ca/old-page"
+
+    # Academic calendar host must be accepted
+    result = crawler.normalize_url("https://academic-calendar.wlu.ca/section.php?cal=1&s=1156&y=92")
+    assert result is not None
 
 
 @pytest.mark.asyncio
