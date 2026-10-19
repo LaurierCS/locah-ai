@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.ingest.seeds import load_seeds
+from app.ingest.url_policy import is_crawlable_link, is_error_document_url, is_persistable_fetch
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,8 @@ class CrawlResult:
     content_hash: str | None = None
     body: bytes | None = None
     content_type: str | None = None
+    # The URL after all redirects (from httpx response.url). None for skips/errors.
+    final_url: str | None = None
 
 
 @dataclass
@@ -143,33 +146,36 @@ class CrawlerState:
 
     async def fetch_and_hash(
         self, url: str, etag: str | None = None
-    ) -> tuple[bytes, str, int, str | None, str]:
+    ) -> tuple[bytes, str, int, str | None, str, str]:
         """
         Fetch URL, compute content hash, handle etag.
 
-        Returns (body, content_hash, http_status, new_etag, content_type).
+        Returns (body, content_hash, http_status, new_etag, content_type, final_url).
         Body is empty if unchanged (304) or fetch failed.
+        final_url is the URL after all redirects (httpx follows them automatically).
+        One retry is attempted on transient RequestError to handle server disconnects.
         """
         if self.http_client is None:
             raise RuntimeError("HTTP client not initialized")
 
-        try:
+        async def _do_fetch() -> tuple[bytes, str, int, str | None, str, str]:
             headers = {}
             if etag:
                 headers["If-None-Match"] = etag
 
-            resp = await self.http_client.get(url, headers=headers)
+            resp = await self.http_client.get(url, headers=headers)  # type: ignore[union-attr]
+            final_url = str(resp.url)
 
             # 304 Not Modified — content unchanged
             if resp.status_code == 304:
                 logger.debug(f"304 Not Modified for {url}")
-                return b"", hashlib.sha256(b"").hexdigest(), 304, etag, ""
+                return b"", hashlib.sha256(b"").hexdigest(), 304, etag, "", final_url
 
             # Check content-type
             content_type = resp.headers.get("content-type", "").lower()
             if not any(ct in content_type for ct in self.config.content_types):
                 logger.warning(f"Content-type not accepted for {url}: {content_type}")
-                return b"", "", resp.status_code, None, content_type
+                return b"", "", resp.status_code, None, content_type, final_url
 
             # Hash raw bytes so PDFs and HTML stay consistent with stored etag/hash logic.
             body = resp.content
@@ -177,19 +183,30 @@ class CrawlerState:
             new_etag = resp.headers.get("etag")
 
             logger.debug(f"Fetched {url} — hash {content_hash[:8]}..., status {resp.status_code}")
-            return body, content_hash, resp.status_code, new_etag, content_type
+            return body, content_hash, resp.status_code, new_etag, content_type, final_url
 
+        try:
+            return await _do_fetch()
         except httpx.TimeoutException:
             logger.error(f"Timeout fetching {url}")
-            return b"", "", 0, None, ""
+            return b"", "", 0, None, "", url
         except httpx.RequestError as e:
-            logger.error(f"Request error for {url}: {e}")
-            return b"", "", 0, None, ""
+            logger.warning(f"Request error for {url}: {e} — retrying once")
+            await asyncio.sleep(1.0)
+            try:
+                return await _do_fetch()
+            except (httpx.RequestError, httpx.TimeoutException) as e2:
+                logger.error(f"Request error for {url}: {e2}")
+                return b"", "", 0, None, "", url
 
     async def extract_links(
         self, url: str, body: bytes, content_type: str, depth: int
     ) -> list[str]:
-        """Extract internal links from HTML content."""
+        """Extract crawlable internal links from HTML content.
+
+        Only returns links that pass both the allowlist (normalize_url) and
+        the asset/error-page denylist (is_crawlable_link).
+        """
         links = []
         if not body or depth >= self.config.depth_cap:
             return links
@@ -203,9 +220,15 @@ class CrawlerState:
 
         for match in re.finditer(r'href=["\'](https?://[^\s"\'<>]+)["\']', content):
             link = match.group(1)
+            # Allowlist check (host must be in CRAWL_ALLOWLIST)
             normalized = self.normalize_url(link)
-            if normalized:
-                links.append(normalized)
+            if not normalized:
+                continue
+            # Denylist check (assets, 404 helpers, infrastructure paths)
+            if not is_crawlable_link(normalized):
+                logger.debug(f"Denylist link skipped: {normalized}")
+                continue
+            links.append(normalized)
         return links
 
     async def crawl_host(
@@ -243,13 +266,25 @@ class CrawlerState:
                     continue
 
                 # Fetch and hash
-                body, content_hash, http_status, _etag, content_type = await self.fetch_and_hash(
-                    url
+                body, content_hash, http_status, _etag, content_type, final_url = (
+                    await self.fetch_and_hash(url)
                 )
 
                 queue.last_fetch_time = datetime.now(UTC)
                 queue.fetched.add(url)
                 self.all_fetched.add(url)
+
+                # If the server redirected us to a Laurier error page, treat as
+                # a skip so we never persist a junk document row.
+                if is_error_document_url(final_url):
+                    logger.warning(f"Error page after redirect for {url} → {final_url}")
+                    host_results.append(
+                        CrawlResult(url, "skip", reason="redirected to error page",
+                                    final_url=final_url)
+                    )
+                    # Still extract links from the original body if any were fetched,
+                    # but in practice error pages have no useful onward links.
+                    continue
 
                 # Track result
                 if http_status in (200, 304):
@@ -261,6 +296,7 @@ class CrawlerState:
                             content_hash=content_hash,
                             body=body if http_status == 200 and body else None,
                             content_type=content_type or None,
+                            final_url=final_url,
                         )
                     )
                 else:
@@ -270,6 +306,7 @@ class CrawlerState:
                             "error",
                             reason=f"HTTP {http_status}",
                             http_status=http_status,
+                            final_url=final_url,
                         )
                     )
 
@@ -359,16 +396,25 @@ async def persist_crawl_results(
     results: list[CrawlResult],
     robots_parsers: dict[str, RobotFileParser],
 ) -> None:
-    """
-    Persist successful crawl results to documents table.
+    """Persist successful crawl results to the documents table.
 
-    Only persists successful fetches (status="success").
-    Logs errors for inspection.
+    Only writes rows for fetches that produced real content: status="success"
+    with a non-empty body, a valid content_hash, and HTTP 200.  Skipping
+    empty-body or non-200 results prevents CSS/304/error-shell rows from
+    inflating the documents table without corresponding chunks.
     """
     from sqlalchemy import text
 
+    persisted = 0
+    skipped = 0
     for result in results:
         if result.status != "success":
+            continue
+
+        # Guard: only persist fetches that produced actual content.
+        if not is_persistable_fetch(result.body, result.content_hash, result.http_status):
+            logger.info(f"Skipping persist for {result.url} — empty body or non-200 status")
+            skipped += 1
             continue
 
         try:
@@ -392,8 +438,9 @@ async def persist_crawl_results(
                     "fetched_at": datetime.now(UTC),
                 },
             )
+            persisted += 1
         except (ValueError, RuntimeError) as e:
             logger.error(f"Failed to persist {result.url}: {e}")
 
     await session.commit()
-    logger.info(f"Persisted {sum(1 for r in results if r.status == 'success')} documents")
+    logger.info(f"Persisted {persisted} documents ({skipped} skipped — empty body/non-200)")
