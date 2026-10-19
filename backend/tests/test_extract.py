@@ -166,7 +166,14 @@ async def test_crawler_hashes_raw_pdf_bytes() -> None:
                     headers={"content-type": "application/pdf"},
                 )
             )
-            body, content_hash, status, _etag, content_type, _final_url = await crawler.fetch_and_hash(url)
+            (
+                body,
+                content_hash,
+                status,
+                _etag,
+                content_type,
+                _final_url,
+            ) = await crawler.fetch_and_hash(url)
 
     assert status == 200
     assert body == pdf_bytes
