@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingest.chunk import chunk_extracted_document
+from app.ingest.content_quality import deactivate_document, is_usable_extracted_text
 from app.ingest.crawler import CrawlResult, crawl
 from app.ingest.embed import Encoder, embed_document
 from app.ingest.extract import extract_document
@@ -52,6 +53,7 @@ class IngestSummary:
     skipped_unchanged: int = field(default=0)
     extract_skipped: int = field(default=0)
     errors: int = field(default=0)
+    quality_rejected: int = field(default=0)
 
 
 # --------------------------------------------------------------------------- #
@@ -105,6 +107,20 @@ async def process_crawl_results(
             if extracted is None:
                 logger.warning("Extraction produced nothing for %s — skipping", url)
                 summary.extract_skipped += 1
+                continue
+
+            # --- Content quality gate ---
+            # Reject consent banners, navigation shells, and other low-value pages
+            # that trafilatura happened to produce something for.  The document row
+            # already exists from persist_crawl_results; deactivate_document marks
+            # it is_active=False and removes its chunks so it never surfaces in search.
+            if not is_usable_extracted_text(extracted.full_text):
+                logger.warning(
+                    "Quality gate rejected %s — content too thin or boilerplate", url
+                )
+                await deactivate_document(session, url)
+                await session.commit()
+                summary.quality_rejected += 1
                 continue
 
             # --- Chunk ---
@@ -185,6 +201,7 @@ def format_ingest_summary(summary: IngestSummary) -> str:
         f"  Chunks upserted:    {summary.chunks_upserted}",
         f"  Skipped unchanged:  {summary.skipped_unchanged}",
         f"  Extract skipped:    {summary.extract_skipped}",
+        f"  Quality rejected:   {summary.quality_rejected}",
         f"  Errors:             {summary.errors}",
     ]
     return "\n".join(lines)
