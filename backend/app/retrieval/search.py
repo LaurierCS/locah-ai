@@ -1,7 +1,7 @@
 """Hybrid search: dense pgvector + sparse FTS, fused with RRF (SDD §5.2 / #7).
 
-TODO(#9): retrieval/confidence.py should consume RetrievedChunk.dense_distance
-    (and the fused list shape) for INV-7 refusal — do not re-query Postgres.
+INV-7 confidence scoring lives in retrieval/confidence.py (#9 — implemented).
+    Pass the returned list directly to assess_confidence; do not re-query Postgres.
 TODO(#11): retrieval/conflict.py runs on this fused top-k, not on raw legs.
 TODO(#72): ask pipeline calls hybrid_search then passes chunks to llm/answer.py.
 TODO(#73): FastAPI /ask must wrap query embed_texts in asyncio.to_thread so
