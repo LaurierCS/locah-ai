@@ -29,13 +29,49 @@ Query embedding uses the same `embed_texts` / ADR-006 model as ingest. Pass `enc
 
 Dense SQL uses `vector_to_pg_literal` from `app.ingest.embed`. Sparse SQL uses `plainto_tsquery('english', …)` so student questions cannot break `tsquery` syntax.
 
-Not in this module yet: `confidence.py` (#9), `conflict.py` (#11), `/ask` wiring (#72 / #73).
+## Confidence scoring (`confidence.py`) — issue #9 [INV-7]
+
+```python
+from app.retrieval import assess_confidence
+
+assessment = assess_confidence(hits)
+if assessment.should_refuse:
+    # hand off to llm/answer.py build_refusal
+    ...
+```
+
+`assess_confidence` takes the `list[RetrievedChunk]` from `hybrid_search` and
+returns a `ConfidenceAssessment` without issuing any additional DB queries —
+it uses `RetrievedChunk.dense_distance` directly.
+
+### Scoring formula
+
+Three signals are weighted into a composite score in [0, 1]:
+
+| Signal | Definition | Weight |
+|--------|------------|--------|
+| `top1` | `max(0, 1 − dense_distance[0])` | 0.55 |
+| `gap` | `min((top1_sim − rank5_sim) / 0.15, 1.0)` | 0.25 |
+| `support` | `min(count(sim ≥ threshold) / 3, 1.0)` | 0.20 |
+
+`rank5` uses `chunks[min(5, n) − 1]`, so it degrades gracefully with fewer than five results. A sparse-only hit (no dense leg) contributes `dense_similarity = 0`.
+
+**Refusal rule:** `score < threshold` **or** empty chunk list → `should_refuse = True`.
+
+The threshold defaults to `settings.confidence_threshold` (0.35) and can be overridden for tests.
+
+`ConfidenceBreakdown` records all three raw signals plus the final score for
+logging and the eval harness.
+
+Not yet in this module: `conflict.py` (#11), `/ask` wiring (#72 / #73).
 
 ## Tests
 
 ```bash
 cd backend
-uv run pytest tests/test_rrf.py tests/test_retrieval_search.py -q
+uv run pytest tests/test_rrf.py tests/test_retrieval_search.py tests/test_confidence.py -q
 ```
 
 `test_retrieval_search.py` needs Postgres with migrations applied (`async_session` skips if the DB is down). CI provides pgvector via `.github/workflows/ci.yml`.
+
+`test_confidence.py` is pure unit — no Postgres or network required.
