@@ -45,7 +45,8 @@ services:
     volumes:
       - ./backend:/app
       # Persist the container venv at /opt/venv (see UV_PROJECT_ENVIRONMENT above).
-      - api-venv:/opt/venv
+      # Renamed from api-venv so existing /app/.venv volumes are not reused at /opt/venv.
+      - api-venv-opt:/opt/venv
     command: uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     networks:
       - locah-network
@@ -74,7 +75,7 @@ services:
 
 volumes:
   pgdata:
-  api-venv:
+  api-venv-opt:
 
 networks:
   locah-network:

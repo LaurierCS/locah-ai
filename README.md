@@ -20,16 +20,20 @@ flowchart TB
   subgraph store [Knowledge store]
     PG[(Postgres + pgvector)]
   end
-  subgraph serve [Answer path — per request]
+  subgraph servePlanned [Answer path — planned S2]
     FE[Next.js chat]
     API[FastAPI]
     Ret[Retrieval + LLM]
-    Claude[Claude API]
+    LLM[LLM provider]
   end
   WLU --> Crawl --> Extract --> Chunk --> Embed --> PG
-  FE --> API --> Ret --> PG
-  Ret --> Claude
+  FE -.-> API
+  API -.-> Ret
+  Ret -.-> PG
+  Ret -.-> LLM
 ```
+
+Solid arrows are what runs today (ingest → Postgres). Dashed arrows are the student Q&A path — frontend chat, `/ask`, retrieval, and an LLM provider are not fully wired in `app/main.py` yet.
 
 For ingest details see [`backend/app/ingest/README.md`](backend/app/ingest/README.md).
 
