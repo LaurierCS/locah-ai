@@ -185,8 +185,18 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 - The answer template renders conflicts explicitly: *"Two Laurier pages state different values — X on \<page A\>, Y on \<page B\>. Confirm with \<office\>."* Never silently pick one.
 
 **Confidence & refusal** (`retrieval/confidence.py`) — **[INV-7]**
-- Score = f(top-1 similarity, score gap between top-1 and top-5, count of chunks above threshold).
-- Below threshold → refusal path with the routing contact for the detected topic.
+- Score = weighted composite of three signals, each normalised to [0, 1]:
+
+  | Signal | Definition | Weight |
+  |--------|------------|--------|
+  | top-1 similarity | `max(0, 1 − dense_distance[0])` | 0.55 |
+  | top-1 vs top-5 gap | `min((top1_sim − rank5_sim) / 0.15, 1.0)` | 0.25 |
+  | support count | `min(count(sim ≥ threshold) / 3, 1.0)` | 0.20 |
+
+  Similarity is derived from the pgvector cosine distance already stored on `RetrievedChunk.dense_distance`; no re-query. A sparse-only hit contributes similarity 0. "rank-5" degrades to the last available chunk when fewer than five results are returned.
+
+- Refusal rule: `score < settings.confidence_threshold` (default 0.35) **or** empty chunk list.
+- Below threshold → refusal path in `llm/answer.py`: fixed message "I couldn't find this on Laurier's site." + human contact from `llm/routing.py` (keyword topic detection keyed to crawl seed categories: co-op, registrar, financial, wellbeing, accessibility, advising).
 
 ### 5.3 LLM layer
 
