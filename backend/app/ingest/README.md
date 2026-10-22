@@ -68,7 +68,7 @@ uv run python -m app.ingest.run --force  # re-embed even unchanged pages
 
 `DATABASE_URL` is read from the environment or from `backend/.env` / `.env` at the repo root.
 
-**Note on scope:** The GitHub Actions workflow sends `{"scope":"high_churn"}` or `{"scope":"full"}` in the request body, but the backend does not parse that field yet (tracked in [issue #38](https://github.com/LaurierCS/locah-ai/issues/38)). Both calls currently run a full `run_ingest()`. The schedule itself is real: nightly at 05:00 UTC for high-churn pages, full crawl every Sunday at 04:00 UTC.
+**Note on scope:** The GitHub Actions workflow sends `{"scope":"high_churn"}` or `{"scope":"full"}` in the request body, but the backend does not parse that field yet ([issue #100](https://github.com/LaurierCS/locah-ai/issues/100)). Both calls currently run a full `run_ingest()`. The schedule itself is real: nightly at 05:00 UTC for high-churn pages, full crawl every Sunday at 04:00 UTC.
 
 **Ingest summary output:**
 
@@ -88,6 +88,45 @@ uv run python -m app.ingest.run --force  # re-embed even unchanged pages
 - **Extract skipped** — pages where extraction returned nothing (unsupported content-type or empty body).
 - **Quality rejected** — pages that passed extraction but were flagged as thin/boilerplate content.
 - **Errors** — pages that raised an unhandled exception; pipeline logged the traceback and continued.
+
+---
+
+## Where ingest lands in Postgres
+
+Ingest writes **`documents`** (one row per URL) and **`chunks`** (many rows per page, each with text + embedding).
+
+```mermaid
+erDiagram
+  documents ||--o{ chunks : has
+
+  documents {
+    uuid id PK
+    text url UK
+    text title
+    text content_hash
+    text embedded_hash
+    text etag
+    int http_status
+    text content_type
+    timestamptz fetched_at
+    boolean is_active
+  }
+
+  chunks {
+    uuid id PK
+    uuid document_id FK
+    int ordinal
+    text heading_path
+    text chunk_text
+    int token_count
+    text url_anchor
+    vector embedding
+  }
+```
+
+Column meanings: **`documents.url`** — canonical page; **`content_hash`** — fingerprint of the latest fetched body; **`embedded_hash`** — `content_hash` at last successful embed (`NULL` if never embedded); **`is_active`** — `false` after quality rejection. **`chunks.ordinal`** — 0-based position on the page; **`chunks.chunk_text`** — stored as column `text` in SQL (shown here as `chunk_text` because `text` is awkward in Mermaid).
+
+**Keys that matter:** `(document_id, ordinal)` is unique — re-embedding upserts by that pair and deletes higher ordinals if the page shrinks. **`content_hash`** changes whenever the crawler sees new bytes; **`embedded_hash`** records what was embedded last. When they match, `embed_document` skips the model ([migration `003`](../../migrations/versions/003_add_embedded_hash.py)).
 
 ---
 
@@ -162,34 +201,37 @@ The main crawler. `CrawlerState` manages the HTTP client, per-host queues, robot
 
 ```mermaid
 flowchart TB
-  start["crawl() — load seeds, group by host"]
-  perHost["crawl_host() — serial within host, concurrent across hosts"]
-  robotsCheck["get_robots_txt_parser() — cached per host"]
-  normalizeUrl["normalize_url() — check allowlist, strip fragment"]
-  urlPolicyCheck["is_crawlable_link() — from url_policy.py"]
-  fetchHash["fetch_and_hash() — GET with If-None-Match"]
+  start["crawl — load seeds, group by host"]
+  perHost["crawl_host — one host at a time"]
+  robotsCheck["should_crawl_url — robots.txt, not already fetched"]
+  fetchHash["fetch_and_hash — GET with If-None-Match"]
   status{"HTTP status"}
   s304["304 — skip, no body"]
-  s200["200 — hash body, store bytes"]
-  errorResult["CrawlResult with status error"]
-  links["extract_links() → enqueue new URLs"]
-  depthCap["depth > cap? drop"]
-  persist["persist_crawl_results() → documents rows"]
-  results["return list[CrawlResult]"]
+  s200["200 — hash body, keep bytes in memory"]
+  httpError["CrawlResult status error"]
+  links["extract_links from HTML"]
+  denylist{"is_crawlable_link?"}
+  skipLink["skip link — debug log only"]
+  enqueue["enqueue on host queue"]
+  depthCap{"depth under cap?"}
+  persist["persist_crawl_results → documents"]
+  results["return list of CrawlResult"]
 
   start --> perHost --> robotsCheck
-  robotsCheck --> normalizeUrl --> urlPolicyCheck
-  urlPolicyCheck -->|pass| fetchHash
-  urlPolicyCheck -->|fail| errorResult
-  fetchHash --> status
-  status -->|304| s304
+  robotsCheck -->|no| perHost
+  robotsCheck -->|yes| fetchHash --> status
+  status -->|304| s304 --> perHost
   status -->|200| s200 --> links
-  status -->|other| errorResult
-  links --> depthCap
-  depthCap -->|under cap| perHost
+  status -->|other| httpError --> perHost
+  links --> denylist
+  denylist -->|no| skipLink
+  denylist -->|yes| enqueue --> depthCap
+  depthCap -->|yes| perHost
   s200 --> persist
   persist --> results
 ```
+
+URLs on the queue were allowlisted when enqueued (seeds via `normalize_url`; discovered links only if they passed `is_crawlable_link`). The fetch loop does **not** call `is_crawlable_link` again before GET.
 
 Key behaviours:
 - Politeness: ≥ 1 s delay per host, one concurrent connection per host, descriptive `User-Agent` with a contact address.
@@ -209,7 +251,7 @@ Strips boilerplate and turns raw bytes into structured sections for the chunker.
 flowchart LR
   input["body bytes + content_type"]
   dispatch{"content-type"}
-  html["text/html → trafilatura\n+ heading path extraction"]
+  html["text/html → trafilatura markdown\n# headings, else HTML h tags"]
   pdf["application/pdf → pypdf\npage-by-page"]
   unsupported["log warning → return None"]
   out["ExtractedDocument"]
@@ -235,9 +277,9 @@ Each **`ExtractBlock`** carries:
 | `text` | Section body (plain text) |
 | `heading_path` | Breadcrumb, e.g. `Registrar > Fees`; `Page N` for PDF |
 | `anchor_id` | HTML `id` on the source heading for `#fragment` citations; `None` for PDF |
-| `char_start` / `char_end` | Byte offsets in `full_text` |
+| `char_start` / `char_end` | Character offsets in `full_text` (Python string indices) |
 
-For HTML, trafilatura extracts the main content and heading structure is rebuilt from `<h1>`–`<h6>` tags inside `<main>` / `<article>`. For PDF, pypdf reads page text and labels each block `Page {n}`.
+For HTML, trafilatura emits **markdown**; sections are split on `#` heading lines when present. If there are no markdown headings, the code falls back to `<h1>`–`<h6>` inside `<main>` / `<article>`. For PDF, pypdf reads page text and labels each block `Page {n}`.
 
 **In plain terms:** Given raw HTML or PDF bytes, this step pulls out the actual article text — not the nav bar or footer — and tags each section with a heading trail so answers can point to the right part of the page.
 
@@ -266,6 +308,8 @@ flowchart LR
 - **Boilerplate fingerprints:** regex patterns for OneTrust cookie consent copy, privacy preference centres, and similar CMS-injected content that occasionally leaks through trafilatura's main-content extraction.
 - Rejected pages: `deactivate_document()` marks the `documents` row `is_active=False` and deletes any existing `chunks` rows so the page never surfaces in search. The audit row stays.
 
+**Known issue:** boilerplate regexes run on the **full** page text — a single cookie-banner phrase **anywhere** rejects the whole document ([issue #99](https://github.com/LaurierCS/locah-ai/issues/99)). Comments in code mention “near the start” but the implementation does not limit matches to a prefix.
+
 **In plain terms:** After extraction, this step asks “is there enough real text here?” Pages that are mostly cookie banners or empty shells get pulled out of search so students don’t get junk hits.
 
 ---
@@ -274,12 +318,12 @@ flowchart LR
 
 Splits an `ExtractedDocument` into overlapping, citation-ready segments.
 
-**Strategy:**
+**Strategy (as implemented today):**
 
-1. Respect heading boundaries — no chunk ever straddles a `heading_path` transition.
-2. Target ~800 tokens per chunk; split on `\n\n` paragraph boundaries to avoid mid-sentence breaks.
-3. 120-token overlap between consecutive chunks keeps retrieval context continuous.
-4. Drop chunks smaller than 50 tokens to avoid fragmentation noise.
+1. Each `ExtractBlock` from extract keeps one `heading_path`; chunking splits **within** a block on `\n\n` paragraphs (blocks already align with sections).
+2. Target ~800 **heuristic** tokens per chunk (`count_tokens` ≈ `words * 0.75`).
+3. Overlap between consecutive chunks is **paragraph-based**, aiming near 120 heuristic tokens but often **one or more full paragraphs** (can exceed 120 in real tokens).
+4. Drop chunks smaller than 50 heuristic tokens.
 
 **`Chunk`** fields:
 
@@ -287,11 +331,11 @@ Splits an `ExtractedDocument` into overlapping, citation-ready segments.
 |-------|---------|
 | `text` | Plain text content |
 | `heading_path` | Breadcrumb from its `ExtractBlock` |
-| `char_start` / `char_end` | Offsets in `full_text` |
+| `char_start` / `char_end` | Offsets in `full_text` (currently section-level in code, not per-chunk precise) |
 | `url_anchor` | HTML anchor id for `#fragment` deep-links in citations |
-| `token_count` | Heuristic: `words * 0.75` (approximates cl100k_base) |
+| `token_count` | Heuristic from `count_tokens` — not the bge or Claude tokenizer |
 
-Token counting is a word-count heuristic for now. When the embedding model is locked in (S2–S3), upgrade to exact counts via the Anthropic SDK.
+**Known issues:** the heuristic **undercounts** real tokens (chunks can be much longer than 800 in bge’s 512-token window). Overlap and sizing need work for the embedding model — track in [issue #97](https://github.com/LaurierCS/locah-ai/issues/97). Heading/title context in vectors is [issue #98](https://github.com/LaurierCS/locah-ai/issues/98).
 
 **In plain terms:** Long pages get cut into bite-sized passages with a bit of overlap, each tied to a heading, so search can return a specific paragraph instead of an entire 20-page PDF.
 

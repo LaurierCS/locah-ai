@@ -76,6 +76,8 @@ See [`docs/SDD.md`](../docs/SDD.md) for architecture and invariants.
 
 ## Architecture
 
+*Caption: arrows mean **Python import / depends-on** (who imports whom), not HTTP request order.*
+
 ```mermaid
 flowchart TB
   main["app/main.py"]
@@ -87,14 +89,13 @@ flowchart TB
   db[("Postgres + pgvector")]
 
   main --> api
-  main --> core
-  core --> api
-  core --> ingest
+  api --> core
   api --> ingest
-  api --> retrieval
+  ingest --> core
   ingest --> db
+  llm --> retrieval
+  llm --> core
   retrieval --> db
-  retrieval --> llm
 ```
 
 `app/ingest` is the offline batch layer — it crawls `wlu.ca`, extracts text, chunks it, and writes dense vector embeddings into `documents` and `chunks`. `app/retrieval` and `app/llm` power the `/ask` endpoint (planned S2), pulling matching chunks from Postgres and synthesising an answer via Claude. `app/core` owns config, redaction, and error types used across everything. `app/api` is HTTP-only: no business logic lives there.

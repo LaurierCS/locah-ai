@@ -50,18 +50,20 @@ repository's **staging** environment before enabling scheduled or manual runs:
    references the `staging` environment, so those secrets are available to its
    job. Only a repository administrator can configure environment secrets for
    an organization repository. See [GitHub's environment-secret instructions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets#creating-secrets-for-an-environment).
-4. Issue #38 must add and deploy the `POST /api/v1/admin/crawl` route. It is a
-   URL path on the backend, not a third secret or a separate service. The route
-   needs to verify `Authorization: Bearer <ADMIN_TOKEN>`, accept `full` and
-   `high_churn` scopes, and return a 2xx response once the job is accepted.
-   You can check that the deployed route is documented in `<base URL>/openapi.json`
-   without starting a crawl. Do not run a crawl until issue #1's ICT signoff.
+4. The `POST /api/v1/admin/crawl` route (issue #38, shipped) is a URL path on the
+   backend, not a third secret or a separate service. It verifies
+   `Authorization: Bearer <ADMIN_TOKEN>` and returns 2xx once a background job is
+   accepted. The workflow may send `full` or `high_churn` in the JSON body; honoring
+   that scope is [issue #100](https://github.com/LaurierCS/locah-ai/issues/100) — today
+   both run a full ingest. Check `<base URL>/openapi.json` without starting a crawl.
+   Do not run a crawl until issue #1's ICT signoff.
 
 In **Actions → Crawl staging knowledge base → Run workflow**, choose `full`
 or `high_churn` to start a manual pass. The workflow checks only whether the
 backend accepted the request; the crawl continues on the backend. A non-2xx
-response fails the workflow. The endpoint must support the request body
-`{"scope":"full"}` or `{"scope":"high_churn"}` (issue #38).
+response fails the workflow. The workflow sends
+`{"scope":"full"}` or `{"scope":"high_churn"}`; the backend ignores scope until
+[#100](https://github.com/LaurierCS/locah-ai/issues/100).
 
 ## The rules that get PRs rejected
 
