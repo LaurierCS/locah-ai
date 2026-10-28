@@ -1,5 +1,7 @@
 """Web crawler for wlu.ca — respects robots.txt, enforces allowlist scope, maintains politeness delays."""
 
+from urllib.parse import urljoin
+from html.parser import HTMLParser
 import asyncio
 import hashlib
 import logging
@@ -97,9 +99,12 @@ class CrawlerState:
                 return None
 
             # Reconstruct as normalized URL
-            scheme = parsed.scheme or "https"
+            scheme = "https"
             netloc = parsed.netloc
+
             path = parsed.path or "/"
+            path = path.removesuffix("index.html")
+
             query = parsed.query
             normalized = f"{scheme}://{netloc}{path}"
             if query:
@@ -215,11 +220,11 @@ class CrawlerState:
 
         content = body.decode("utf-8", errors="replace")
 
-        # Simple regex-based link extraction (trafilatura is for extraction, not link parsing)
-        import re
+        for link in _parse_hrefs(content):
+            # Resolve relative URLs
+            if link.startswith("/"):
+                link = urljoin(url, link)
 
-        for match in re.finditer(r'href=["\'](https?://[^\s"\'<>]+)["\']', content):
-            link = match.group(1)
             # Allowlist check (host must be in CRAWL_ALLOWLIST)
             normalized = self.normalize_url(link)
             if not normalized:
@@ -228,7 +233,9 @@ class CrawlerState:
             if not is_crawlable_link(normalized):
                 logger.debug(f"Denylist link skipped: {normalized}")
                 continue
-            links.append(normalized)
+            # Remove duplicates
+            if normalized not in links:
+                links.append(normalized)
         return links
 
     async def crawl_host(
@@ -450,3 +457,22 @@ async def persist_crawl_results(
 
     await session.commit()
     logger.info(f"Persisted {persisted} documents ({skipped} skipped — empty body/non-200)")
+
+
+def _parse_hrefs(html: str) -> list[str]:
+    """Extract all raw <a href="..."> values from an HTML string."""
+
+    class _LinkExtractor(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.links: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag == "a":
+                for attr, value in attrs:
+                    if attr == "href" and value is not None:
+                        self.links.append(value)
+
+    parser = _LinkExtractor()
+    parser.feed(html)
+    return parser.links
