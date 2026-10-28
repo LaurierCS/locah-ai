@@ -62,12 +62,13 @@ _ERROR_QUERY_PARAMS: tuple[str, ...] = (
 
 
 def is_crawlable_link(url: str) -> bool:
-    """Return True when a discovered link should be enqueued for crawling.
+    """Return True when a normalized link should be enqueued for crawling.
 
     Rejects asset files, infrastructure paths, and Laurier error-page helpers
-    before spending a network round-trip on them.  Also rejects relative URLs
-    and anything without an http(s) scheme (the crawler only handles absolute
-    URLs; normalize_url is the primary guard, but this is a defensive belt).
+    before spending a network round-trip on them.  Relative links are resolved
+    against the page URL in ``extract_links`` and canonicalized by
+    ``normalize_url`` before reaching this check, so any remaining relative or
+    non-http(s) URL is rejected here as a defensive guard.
     """
     try:
         parsed = urlparse(url)

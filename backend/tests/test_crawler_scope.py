@@ -75,3 +75,30 @@ async def test_robots_disallow_is_respected() -> None:
     mock_parser.can_fetch.return_value = True
     should_crawl = await crawler.should_crawl_url("https://www.wlu.ca/public", "www.wlu.ca")
     assert should_crawl, "URL allowed by robots.txt should be crawled"
+
+
+@pytest.mark.asyncio
+async def test_extract_links_from_html_file() -> None:
+    config = CrawlerConfig(
+        allowlist=settings.allowed_hosts,
+        user_agent=settings.crawl_user_agent,
+        delay_seconds=settings.crawl_delay_seconds,
+        max_pages=settings.crawl_max_pages,
+        depth_cap=2,
+        content_types=["text/html", "application/pdf"],
+    )
+    crawler = CrawlerState(config)
+
+    html = b"""
+    <html><body>
+      <a href="http://students.wlu.ca/academics/index.html">Valid</a>
+      <a href="https://students.wlu.ca/academics/">Valid too</a>
+      <a href="https://students.wlu.ca/academics/index.html#section1">With Fragment</a>
+      <a href="https://example.com/offsite">Offsite</a>
+      <a href="https://www.wlu.ca/assets/app.css">CSS Asset</a>
+      <a href="/relative/index.html">Relative</a>
+    </body></html>
+    """
+
+    links = await crawler.extract_links("https://students.wlu.ca", html, "text/html", depth=0)
+    assert links == ["https://students.wlu.ca/academics/", "https://students.wlu.ca/relative/"]
