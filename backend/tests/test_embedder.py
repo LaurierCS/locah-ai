@@ -7,9 +7,13 @@ model downloads and Postgres (per the issue's "mocked embedding API" criterion).
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
-from app.ingest.chunk import Chunk
+from app.ingest import embed as embed_module
+from app.ingest.chunk import EMBED_MAX_SEQ_LENGTH, MAX_CHUNK_TOKENS, Chunk
 from app.ingest.embed import EmbedResult, embed_document, embed_texts
 
 
@@ -215,6 +219,48 @@ async def test_upsert_params_carry_ordinal_and_embedding() -> None:
     first = inserts[0]
     assert first["embedding"].startswith("[") and first["embedding"].endswith("]")
     assert first["embedding"].count(",") == 3  # dim=4 -> 3 commas
+
+
+# --------------------------------------------------------------------------- #
+# Model input limit (#97): truncation is configured explicitly, never silent
+# --------------------------------------------------------------------------- #
+def test_load_model_pins_max_seq_length(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeSentenceTransformer:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.max_seq_length = 8192
+
+    fake_module = types.ModuleType("sentence_transformers")
+    fake_module.SentenceTransformer = FakeSentenceTransformer  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+    monkeypatch.setattr(embed_module, "_model_cache", {})
+
+    model = embed_module._load_model("fake-model")
+
+    assert model.max_seq_length == EMBED_MAX_SEQ_LENGTH  # type: ignore[attr-defined]
+
+
+async def test_warns_when_a_chunk_exceeds_the_model_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    oversized = Chunk(
+        text="x",
+        heading_path="",
+        char_start=0,
+        char_end=1,
+        url_anchor=None,
+        token_count=MAX_CHUNK_TOKENS + 1,
+    )
+    with caplog.at_level("WARNING", logger="app.ingest.embed"):
+        await embed_document(
+            FakeSession(),
+            document_id="doc-1",
+            content_hash="h",
+            chunks=[oversized, *make_chunks(1)],
+            encoder=RecordingEncoder(),
+        )
+
+    assert "1 chunk(s) of doc-1 exceed" in caplog.text
 
 
 async def test_empty_chunks_still_records_hash_and_clears() -> None:

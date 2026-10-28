@@ -140,20 +140,22 @@ chunks = chunk_extracted_document(doc.full_text, doc.blocks)
 | `heading_path` | Breadcrumb hierarchy (e.g., `Registrar > Fees`) |
 | `char_start` / `char_end` | Character offsets in full document (maps to `SDD char_range`) |
 | `url_anchor` | HTML anchor id for deep-linking `#fragments` in citations |
-| `token_count` | Approximate token count (heuristic: `words * 0.75`) |
+| `token_count` | bge-base-en-v1.5 token count of `text` (special tokens excluded) |
 
 **Chunking strategy:**
 
-1. **Heading boundaries first:** Each chunk preserves heading context; no breaking `heading_path` mid-chunk.
-2. **Recursive split:** Target ~800 tokens per chunk; split on `\n\n` paragraph boundaries to avoid breaking sentences.
-3. **120-token overlap:** Consecutive chunks overlap by ~120 tokens to maintain retrieval context (enables sliding-window retrieval).
-4. **No tiny chunks:** Chunks smaller than 50 tokens are skipped to avoid fragmentation.
+1. **Heading boundaries first:** A chunk never mixes unrelated sections.
+2. **Small sections are merged, not dropped:** A section under 50 tokens (a deadline, a phone number, office hours) joins an adjacent section under the same parent heading; the merged chunk's `heading_path` is their common parent. Only empty text is discarded.
+3. **Sized for the embedder:** Target ~350 tokens per chunk. Oversized sections split on paragraphs, then sentences/lines, then a hard token cut, so no chunk exceeds 510 tokens (bge's 512 minus `[CLS]`/`[SEP]`). The headroom below 512 is for heading/title context added at embed time.
+4. **≤50-token overlap:** Consecutive chunks of a section share up to 50 tokens of whole trailing sentences.
 
-**Token counting:** Uses a language-agnostic heuristic (`words * 0.75`) that approximates the Claude model encoder. When the embedding model is finalized (S2–S3), upgrade to `anthropic.Anthropic().messages.count_tokens(...)` for exact counts.
+**Token counting:** Uses the embedding model's own tokenizer (loaded with `transformers.AutoTokenizer` from `settings.embedding_model`, cached per process). The limit that matters is what bge reads: 512 tokens, beyond which it truncates. `embed.py` pins `max_seq_length = 512` and logs a warning if a chunk would be truncated. `content_quality.MIN_DOCUMENT_TOKENS` uses the same counter.
+
+**After changing chunking**, re-embed the index: `uv run python -m app.ingest.run --force` (unchanged pages are otherwise skipped by `embedded_hash`).
 
 **Invariants:**
-- Every chunk's `token_count` matches the actual count of its `text`.
-- `char_start` and `char_end` are valid offsets into `doc.full_text`.
+- Every chunk's `token_count` matches the actual count of its `text`, and is at most 510.
+- `doc.full_text[char_start:char_end] == text` for every chunk.
 - When retrieved for citations, a chunk's `text` contains the quoted passage and `url_anchor` points to the right section.
 
 ## Embedder (`embed.py`)

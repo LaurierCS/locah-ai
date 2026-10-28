@@ -31,9 +31,10 @@ logger = logging.getLogger(__name__)
 # A document must produce at least this many tokens of real text after
 # trafilatura stripping.  Anything below this is almost certainly a navigation
 # shell, consent banner, or empty redirect page.
-# count_tokens() uses the heuristic: tokens ≈ words * 0.75, so 50 tokens ≈ 67
-# words of prose — enough to reject menus/shells but accept short real pages.
-MIN_DOCUMENT_TOKENS = 50
+# count_tokens() counts real bge-base tokens, about 1.0–1.3 per English word, so
+# 80 tokens ≈ 65 words of prose (the same floor as the old word heuristic) —
+# enough to reject menus/shells but accept short real pages.
+MIN_DOCUMENT_TOKENS = 80
 
 # ---------------------------------------------------------------------------
 # Boilerplate fingerprints — cookie consent / CMS navigation shells

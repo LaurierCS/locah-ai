@@ -160,7 +160,7 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 - Preserves heading hierarchy as a breadcrumb string, used later as chunk context.
 
 **Chunker** (`ingest/chunk.py`)
-- Heading-aware recursive split, target 800 tokens, 120-token overlap.
+- Heading-aware recursive split sized for the embedder (ADR-006): target 350 bge tokens, ≤50-token overlap, hard cap 510 so nothing is truncated at bge's 512-token input. Short sections merge into a neighbour under the same parent heading rather than being dropped.
 - Each chunk carries: `document_id`, `heading_path`, `char_range`, `url` (with `#anchor` when a heading id exists so citations deep-link).
 
 **Embedder** (`ingest/embed.py`)

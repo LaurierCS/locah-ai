@@ -31,7 +31,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.ingest.chunk import Chunk
+from app.ingest.chunk import EMBED_MAX_SEQ_LENGTH, MAX_CHUNK_TOKENS, Chunk
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,10 @@ def _load_model(name: str) -> object:
         from sentence_transformers import SentenceTransformer
 
         logger.info("Loading embedding model %r", name)
-        _model_cache[name] = SentenceTransformer(name)
+        model = SentenceTransformer(name)
+        # Pin the input limit the chunker sizes against (chunk.MAX_CHUNK_TOKENS).
+        model.max_seq_length = EMBED_MAX_SEQ_LENGTH
+        _model_cache[name] = model
     return _model_cache[name]
 
 
@@ -196,6 +199,15 @@ async def embed_document(
         if stored is not None and stored == content_hash:
             logger.info("Skipping %s — content_hash unchanged (%s)", document_id, content_hash[:8])
             return EmbedResult(document_id=document_id, embedded=0, skipped=True)
+
+    oversized = sum(1 for c in chunks if c.token_count > MAX_CHUNK_TOKENS)
+    if oversized:
+        logger.warning(
+            "%d chunk(s) of %s exceed %d tokens; the embedder will truncate them",
+            oversized,
+            document_id,
+            MAX_CHUNK_TOKENS,
+        )
 
     # Sync CPU + retry sleep; see module docstring before calling from async HTTP handlers.
     vectors = embed_texts(
