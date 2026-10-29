@@ -233,7 +233,7 @@ class CrawlerState:
             if not is_crawlable_link(normalized):
                 logger.debug(f"Denylist link skipped: {normalized}")
                 continue
-            # Remove duplicates
+            # Prevent duplicates
             if normalized not in links:
                 links.append(normalized)
         return links
