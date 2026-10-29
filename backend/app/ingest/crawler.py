@@ -1,14 +1,13 @@
 """Web crawler for wlu.ca — respects robots.txt, enforces allowlist scope, maintains politeness delays."""
 
-from urllib.parse import urljoin
-from html.parser import HTMLParser
 import asyncio
 import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from html.parser import HTMLParser
 from typing import Self
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import httpx
