@@ -66,6 +66,8 @@ uv run python -m app.ingest.run        # full crawl → embed
 uv run python -m app.ingest.run --force  # re-embed even unchanged pages
 ```
 
+Existing indexes need that `--force` run after the #97 chunker change lands. Unchanged pages are otherwise skipped (`embedded_hash`) and keep the old oversized chunks.
+
 `DATABASE_URL` is read from the environment or from `backend/.env` / `.env` at the repo root.
 
 **Note on scope:** The GitHub Actions workflow sends `{"scope":"high_churn"}` or `{"scope":"full"}` in the request body, but the backend does not parse that field yet ([issue #100](https://github.com/LaurierCS/locah-ai/issues/100)). Both calls currently run a full `run_ingest()`. The schedule itself is real: nightly at 05:00 UTC for high-churn pages, full crawl every Sunday at 04:00 UTC.
@@ -282,7 +284,7 @@ Each **`ExtractBlock`** carries:
 | `anchor_id` | HTML `id` on the source heading for `#fragment` citations; `None` for PDF |
 | `char_start` / `char_end` | Character offsets in `full_text` (Python string indices) |
 
-For HTML, trafilatura emits **markdown**; sections are split on `#` heading lines when present. If there are no markdown headings, the code falls back to `<h1>`–`<h6>` inside `<main>` / `<article>`. For PDF, pypdf reads page text and labels each block `Page {n}`.
+For HTML, trafilatura emits **markdown**; sections are split on `#` heading lines when present. If there are no markdown headings, the code falls back to `<h1>`–`<h6>` inside `<main>` / `<article>`. That fallback keeps block elements as paragraph breaks and `<br>` as line breaks, so a long section is still splittable. For PDF, pypdf reads page text and labels each block `Page {n}`.
 
 **In plain terms:** Given raw HTML or PDF bytes, this step pulls out the actual article text — not the nav bar or footer — and tags each section with a heading trail so answers can point to the right part of the page.
 
@@ -295,7 +297,7 @@ Runs after extraction, before chunking. Decides whether the extracted text is wo
 ```mermaid
 flowchart LR
   text["extracted full_text"]
-  tokenCheck{"count_tokens(text)\n≥ 50?"}
+  tokenCheck{"count_tokens(text)\n≥ 80?"}
   boilerCheck{"boilerplate\npatterns match?"}
   pass["pass → chunk + embed"]
   reject["reject → deactivate_document()"]
@@ -307,7 +309,7 @@ flowchart LR
   boilerCheck -->|no| pass
 ```
 
-- **Token floor (50 tokens ≈ 67 words):** catches navigation shells, empty redirect pages, and anything trafilatura technically extracted but that has no real prose.
+- **Token floor (80 bge tokens, about 65 words):** `count_tokens` uses the embedding tokenizer, so this is the same ~65-word floor the old 50-heuristic-token gate was aiming at. It catches navigation shells, empty redirect pages, and anything trafilatura technically extracted but that has no real prose.
 - **Boilerplate fingerprints:** regex patterns for OneTrust cookie consent copy, privacy preference centres, and similar CMS-injected content that occasionally leaks through trafilatura's main-content extraction.
 - Rejected pages: `deactivate_document()` marks the `documents` row `is_active=False` and deletes any existing `chunks` rows so the page never surfaces in search. The audit row stays.
 
@@ -319,28 +321,28 @@ flowchart LR
 
 ### `chunk.py`
 
-Splits an `ExtractedDocument` into overlapping, citation-ready segments.
+Splits an `ExtractedDocument` into overlapping, citation-ready segments sized for bge-base-en-v1.5 ([issue #97](https://github.com/LaurierCS/locah-ai/issues/97)).
 
-**Strategy (as implemented today):**
+**Strategy:**
 
-1. Each `ExtractBlock` from extract keeps one `heading_path`; chunking splits **within** a block on `\n\n` paragraphs (blocks already align with sections).
-2. Target ~800 **heuristic** tokens per chunk (`count_tokens` ≈ `words * 0.75`).
-3. Overlap between consecutive chunks is **paragraph-based**, aiming near 120 heuristic tokens but often **one or more full paragraphs** (can exceed 120 in real tokens).
-4. Drop chunks smaller than 50 heuristic tokens.
+1. **Heading boundaries first.** A chunk never mixes unrelated sections. Top-level headings are not treated as siblings of each other.
+2. **Small sections are merged, not dropped.** A section under 50 tokens (a deadline, a phone number, office hours) joins an adjacent sibling or parent section when the joined text still fits the target. The merged chunk's `heading_path` is their common parent. Only empty text is discarded.
+3. **Sized for the embedder.** Target ~350 tokens. Oversized sections split on paragraphs, then sentences or lines, then a hard token cut. The budget is the token count of the chunk text itself, separators included, so no chunk exceeds 510 tokens (bge's 512 minus `[CLS]`/`[SEP]`). The headroom below 512 is for heading/title context added at embed time ([issue #98](https://github.com/LaurierCS/locah-ai/issues/98)).
+4. **≤50-token overlap.** Consecutive chunks of a section share up to 50 tokens of whole trailing sentences.
 
 **`Chunk`** fields:
 
 | Field | Meaning |
 |-------|---------|
 | `text` | Plain text content |
-| `heading_path` | Breadcrumb from its `ExtractBlock` |
-| `char_start` / `char_end` | Offsets in `full_text` (currently section-level in code, not per-chunk precise) |
+| `heading_path` | Breadcrumb from its section, or the common parent when short sections were merged |
+| `char_start` / `char_end` | Exact offsets in `full_text`: `full_text[char_start:char_end] == text` (SDD `char_range`, **INV-4**) |
 | `url_anchor` | HTML anchor id for `#fragment` deep-links in citations |
-| `token_count` | Heuristic from `count_tokens` — not the bge or Claude tokenizer |
+| `token_count` | bge-base-en-v1.5 token count of `text` (special tokens excluded), at most 510 |
 
-**Known issues:** the heuristic **undercounts** real tokens (chunks can be much longer than 800 in bge’s 512-token window). Overlap and sizing need work for the embedding model — track in [issue #97](https://github.com/LaurierCS/locah-ai/issues/97). Heading/title context in vectors is [issue #98](https://github.com/LaurierCS/locah-ai/issues/98).
+**Token counting:** `transformers.AutoTokenizer` loaded from `settings.embedding_model`, cached per process. `content_quality.MIN_DOCUMENT_TOKENS` uses the same counter. `embed.py` pins `max_seq_length = 512` and logs a warning if a chunk would be truncated.
 
-**In plain terms:** Long pages get cut into bite-sized passages with a bit of overlap, each tied to a heading, so search can return a specific paragraph instead of an entire 20-page PDF.
+**In plain terms:** Long pages get cut into passages the embedding model can actually read, with a little overlap, each tied to a heading. Short facts such as deadlines stay in the index instead of being thrown away.
 
 ---
 
@@ -372,10 +374,11 @@ flowchart TB
 ```
 
 - **Where the model runs:** `embed_texts` calls the cached `SentenceTransformer` encoder (or a test `encoder=` mock). `embed_document` only orchestrates DB reads/writes and invokes `embed_texts` when the page content hash changed.
-- **Idempotency:** `embedded_hash` (migration `003`) stores the last successfully embedded `content_hash`. A match skips encode entirely — no model load, no vectors computed.
+- **Input limit:** after load, `max_seq_length` is pinned to 512 (the chunker's hard cap is 510 content tokens, leaving room for `[CLS]` and `[SEP]`). A chunk over that cap logs a warning; truncation is not silent.
+- **Idempotency:** `embedded_hash` (migration `003`) stores the last successfully embedded `content_hash`. A match skips encode entirely — no model load, no vectors computed. Pass `force=True` (CLI `--force`) to re-embed anyway. Existing indexes need that after the #97 chunker change.
 - **Batching + retry:** batches of 32; up to 4 retries with exponential backoff per failed batch.
 - **Upsert + cleanup:** rows keyed by `document_id` + `ordinal`; extra ordinals from a previous run are deleted. Vectors are written as pgvector literals on the `embedding` column.
-- **`Encoder` injection:** pass `encoder=` into `embed_document` / `embed_texts` in tests so CI never downloads the Hugging Face weights.
+- **`Encoder` injection:** pass `encoder=` into `embed_document` / `embed_texts` in tests so CI does not download the embedding weights. Chunker tests do load the bge tokenizer; CI caches `~/.cache/huggingface`.
 
 **In plain terms:** Each chunk’s words are turned into a numeric fingerprint the database can compare to future questions. If the page hasn’t changed since last time, this step skips the model entirely and leaves the old vectors in place.
 

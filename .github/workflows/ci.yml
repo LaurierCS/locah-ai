@@ -21,6 +21,13 @@ jobs:
       run: { working-directory: backend }
     steps:
       - uses: actions/checkout@v7
+      - name: Cache Hugging Face tokenizers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: ${{ runner.os }}-huggingface-${{ hashFiles('backend/uv.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-huggingface-
       - uses: astral-sh/setup-uv@v10.3.2
         with:
           python-version: "3.14"

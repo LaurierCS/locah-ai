@@ -24,6 +24,13 @@ _HEADING_TAG_RE = re.compile(
 _HEADING_ID_RE = re.compile(r"""\bid\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 _MARKDOWN_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)\s*$")
 _TAG_RE = re.compile(r"<[^>]+>")
+_BLOCK_TAG_RE = re.compile(
+    r"</?(?:address|article|aside|blockquote|dd|div|dl|dt|figcaption|figure|footer|form"
+    r"|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|tfoot|thead|tr|ul)\b[^>]*>",
+    re.IGNORECASE,
+)
+_LINE_BREAK_TAG_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_BLANK_LINE_RE = re.compile(r"\n\s*\n")
 
 
 @dataclass(frozen=True)
@@ -79,10 +86,29 @@ def _build_anchor_map(html: str) -> dict[str, str]:
     return anchors
 
 
+def _inline_text(fragment: str) -> str:
+    """Strip tags and collapse all whitespace onto one line (for headings)."""
+    return " ".join(_TAG_RE.sub(" ", fragment).split())
+
+
 def _plain_text(fragment: str) -> str:
-    """Strip tags and collapse whitespace."""
-    text = _TAG_RE.sub(" ", fragment)
-    return " ".join(text.split())
+    """Strip tags, keeping block elements as paragraph breaks and <br> as line breaks.
+
+    The chunker splits on these breaks, so collapsing them would turn a whole
+    section into one unsplittable paragraph.
+    """
+    # Source whitespace (including newlines) is insignificant in HTML; only tags break lines.
+    text = " ".join(fragment.split())
+    text = _LINE_BREAK_TAG_RE.sub("\n", text)
+    text = _BLOCK_TAG_RE.sub("\n\n", text)
+    text = _TAG_RE.sub(" ", text)
+    paragraphs = []
+    for paragraph in _BLANK_LINE_RE.split(text):
+        lines = (" ".join(line.split()) for line in paragraph.split("\n"))
+        joined = "\n".join(line for line in lines if line)
+        if joined:
+            paragraphs.append(joined)
+    return "\n\n".join(paragraphs)
 
 
 def _html_main_scope(html: str) -> str:
@@ -112,7 +138,7 @@ def _sectionize_html_headings(scoped_html: str) -> list[tuple[str, str, str | No
     for index, heading in enumerate(headings):
         level = int(heading.group(1))
         attrs = heading.group(2)
-        title = _plain_text(heading.group(3))
+        title = _inline_text(heading.group(3))
         id_match = _HEADING_ID_RE.search(attrs)
         anchor_id = id_match.group(1) if id_match else None
 

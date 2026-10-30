@@ -95,6 +95,32 @@ def test_html_prose_only_single_block() -> None:
     assert "Standalone paragraph" in doc.blocks[0].text
 
 
+def test_html_heading_fallback_keeps_paragraph_breaks() -> None:
+    """The <h*> fallback (no markdown headings from trafilatura) must keep block
+    boundaries, or the chunker gets one unsplittable paragraph (#97)."""
+    from app.ingest.extract import _sectionize_html_headings
+
+    html = (
+        "<h2 id='fees'>Fees <br>and Payments</h2>"
+        "<p>First paragraph about tuition.</p>"
+        "<p>Second   paragraph\n about <b>refunds</b> and credits.</p>"
+        "<ul><li>Pay online</li><li>Pay in person</li></ul>"
+        "<p>Line one<br>Line two</p>"
+    )
+    sections = _sectionize_html_headings(html)
+
+    assert sections == [
+        (
+            "Fees and Payments",
+            (
+                "First paragraph about tuition.\n\nSecond paragraph about refunds and credits."
+                "\n\nPay online\n\nPay in person\n\nLine one\nLine two"
+            ),
+            "fees",
+        )
+    ]
+
+
 def test_pdf_page_numbered_sections() -> None:
     pdf_bytes = _make_pdf_with_pages("First page body", "Second page body")
     doc = extract_document(
