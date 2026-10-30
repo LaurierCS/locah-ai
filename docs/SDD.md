@@ -155,20 +155,22 @@ Pods own *directories*, so merge conflicts are rare and a new volunteer can be o
 - Persists `documents(url, http_status, content_hash, etag, fetched_at)`. Unchanged `content_hash` short-circuits re-embedding.
 
 **Extractor** (`ingest/extract.py`)
-- HTML → main content via `trafilatura`; strips nav, footer, cookie banners.
+- HTML → main content via `trafilatura`; strips nav, footer, cookie banners. When trafilatura emits no markdown headings, sections come from `<h1>`–`<h6>` and block breaks are preserved so long sections can still be split.
 - PDF → text via `pypdf`, page-numbered.
 - Preserves heading hierarchy as a breadcrumb string, used later as chunk context.
 
 **Chunker** (`ingest/chunk.py`)
-- Heading-aware recursive split sized for the embedder (ADR-006): target 350 bge tokens, ≤50-token overlap, hard cap 510 so nothing is truncated at bge's 512-token input. Short sections merge into a neighbour under the same parent heading rather than being dropped.
-- Each chunk carries: `document_id`, `heading_path`, `char_range`, `url` (with `#anchor` when a heading id exists so citations deep-link).
+- Heading-aware recursive split sized for the embedder (ADR-006). Token counts use the bge tokenizer, not a word heuristic: target 350 tokens, ≤50-token overlap, hard cap 510 so nothing is truncated at bge's 512-token input (`[CLS]` and `[SEP]` take the other two). Split order is paragraphs, then sentences, then a hard token cut. The budget is the token count of the chunk text itself, separators included.
+- Short sections merge into an adjacent sibling or parent under the same heading rather than being dropped. Top-level sections are not merged with each other. Only empty text is discarded.
+- Each chunk carries: `document_id`, `heading_path`, `char_range`, `url` (with `#anchor` when a heading id exists so citations deep-link). `full_text[char_start:char_end] == text`, so a citation's char range locates the quoted passage. **[INV-4]**
+- Changing chunk boundaries does not re-embed unchanged pages (`embedded_hash`). After this sizing change, rebuild existing indexes with `uv run python -m app.ingest.run --force`.
 
 **Embedder** (`ingest/embed.py`)
 - Batched embedding calls (default 32); retry with exponential backoff; upsert into `chunks.embedding vector(768)` by `(document_id, ordinal)`, clearing now-excess rows when a re-embed yields fewer chunks.
-- Model: BAAI/bge-base-en-v1.5 (768-dimensional), run locally on CPU via `sentence-transformers`; embeddings are normalized for pgvector cosine distance. See ADR-006 for selection rationale. Configuration via `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in `.env`.
-- Skips re-embedding when the parent document's `content_hash` is unchanged since its last embed. Because the crawler overwrites `documents.content_hash` on every fetch, the last-embedded fingerprint is tracked separately in `documents.embedded_hash` (migration `003`); the embedder skips when the two match and advances `embedded_hash` on success.
+- Model: BAAI/bge-base-en-v1.5 (768-dimensional), run locally on CPU via `sentence-transformers`; embeddings are normalized for pgvector cosine distance. See ADR-006 for selection rationale. Configuration via `EMBEDDING_MODEL` and `EMBEDDING_DIMENSIONS` in `.env`. `max_seq_length` is pinned to 512, and a chunk that would be truncated logs a warning.
+- Skips re-embedding when the parent document's `content_hash` is unchanged since its last embed. Because the crawler overwrites `documents.content_hash` on every fetch, the last-embedded fingerprint is tracked separately in `documents.embedded_hash` (migration `003`); the embedder skips when the two match and advances `embedded_hash` on success. `force` re-embeds anyway.
 - As the chunker only produces in-memory `Chunk` objects, the embedder is the stage that first persists chunk rows (text and metadata alongside the embedding). The orchestrator (#37) wires crawl → extract → chunk → embed into one run.
-- The embedding model is injectable, so unit tests run with a mock (no model download or live key in CI).
+- The embedding model is injectable, so embedder unit tests run with a mock (no model-weight download in CI). Chunker tests load the bge tokenizer; CI caches `~/.cache/huggingface`.
 
 **Scheduling**: nightly full pass over high-churn seeds (dates, deadlines), weekly full crawl. A GitHub Actions cron triggers a backend job endpoint.
 
