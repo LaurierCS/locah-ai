@@ -96,6 +96,32 @@ def test_unbreakable_text_is_hard_cut_to_fit() -> None:
 
     assert len(chunks) > 1
     _assert_fits_model(full_text, chunks)
+    # No sentence breaks, so there is no overlap: the cuts must tile the source.
+    assert chunks[0].char_start == 0
+    assert chunks[-1].char_end == len(full_text)
+    assert "".join(chunk.text for chunk in chunks) == full_text
+
+
+def test_hard_cut_keeps_spaces_between_tokens() -> None:
+    raw = ("tuition " * 800).strip()  # spaces, but no sentence punctuation to split on
+    full_text, blocks = _single_block(raw)
+    chunks = chunk_extracted_document(full_text, blocks)
+
+    assert len(chunks) > 1
+    _assert_fits_model(full_text, chunks)
+    assert all(chunk.token_count <= TARGET_CHUNK_TOKENS for chunk in chunks)
+    assert "".join(chunk.text for chunk in chunks) == full_text
+
+
+def test_short_lines_cannot_exceed_the_model_limit() -> None:
+    """Separators between pieces are tokens. Ignoring them used to pack one chunk
+    past 512 on a page of one-word lines."""
+    full_text, blocks = _single_block("\n".join(["deadline"] * 400))
+    chunks = chunk_extracted_document(full_text, blocks)
+
+    assert len(chunks) > 1
+    _assert_fits_model(full_text, chunks)
+    assert all(chunk.token_count <= TARGET_CHUNK_TOKENS for chunk in chunks)
 
 
 def test_chunks_cover_the_whole_section() -> None:
@@ -166,6 +192,28 @@ def test_short_sections_under_unrelated_headings_stay_separate() -> None:
     chunks = chunk_extracted_document(full_text, blocks)
 
     assert [c.heading_path for c in chunks] == ["Fees > Payment", "Housing > Move-in"]
+
+
+def test_unrelated_top_level_sections_are_not_merged() -> None:
+    """Top-level headings have no parent. Treating "" as a shared parent used to
+    merge Fees with Housing and replace both headings with an empty path."""
+    full_text, blocks = _blocks(("Fees", "Pay by the 15th."), ("Housing", "Move in on Saturday."))
+    chunks = chunk_extracted_document(full_text, blocks)
+
+    assert [c.heading_path for c in chunks] == ["Fees", "Housing"]
+    assert [c.text for c in chunks] == ["Pay by the 15th.", "Move in on Saturday."]
+    _assert_fits_model(full_text, chunks)
+
+
+def test_many_short_sibling_sections_stay_within_the_limit_and_are_kept() -> None:
+    sections = tuple((f"Dates > Item {i}", f"Note {i}.") for i in range(120))
+    full_text, blocks = _blocks(*sections)
+    chunks = chunk_extracted_document(full_text, blocks)
+
+    _assert_fits_model(full_text, chunks)
+    assert all(chunk.token_count <= TARGET_CHUNK_TOKENS for chunk in chunks)
+    for i in range(120):
+        assert any(f"Note {i}." in chunk.text for chunk in chunks)
 
 
 def test_short_section_next_to_a_large_one_is_not_dropped() -> None:

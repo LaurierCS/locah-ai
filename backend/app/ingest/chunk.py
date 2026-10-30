@@ -6,15 +6,18 @@ Outputs: List[Chunk] with heading_path, char range, url_anchor and token_count.
 
 Chunking strategy:
   1. Heading sections are the outer boundary: a chunk never mixes unrelated sections.
+     Top-level headings have no parent, so they are not merged with each other.
   2. Sections under MIN_SECTION_TOKENS are merged into a neighbouring section under
      the same parent heading instead of being dropped (deadlines, phone numbers and
-     office hours live in short sections). Only empty text is discarded.
+     office hours live in short sections). Only empty text is discarded. A merge
+     only happens when the joined text still fits in one target chunk.
   3. Sections over TARGET_CHUNK_TOKENS are split on paragraphs, then sentences or
      lines, then a hard token cut, so no chunk can exceed MAX_CHUNK_TOKENS.
+     Budgets are the token count of the chunk text itself, separators included.
   4. Consecutive chunks of a section overlap by at most OVERLAP_TOKENS, taken as
      whole trailing sentences of the previous chunk.
   5. Each chunk's text is an exact slice of the document's full_text, so
-     char_start/char_end always locate it.
+     char_start/char_end always locate it. Hard cuts cover the source without gaps.
 
 Token counting: uses the embedding model's own tokenizer (bge-base-en-v1.5), because
 the limit that matters is what the embedder reads. bge reads at most 512 tokens,
@@ -127,28 +130,72 @@ def _split_spans(
     return spans
 
 
-def _hard_cut(text: str, start: int, end: int) -> list[_Span]:
-    """Cut text[start:end] every TARGET_CHUNK_TOKENS tokens, preferring word boundaries."""
+def _token_layout(text: str, start: int, end: int) -> list[tuple[int, int, int | None]]:
+    """Return (abs_start, abs_end, word_id) for each real token in text[start:end]."""
     encoding = _tokenizer()(
         text[start:end],
         add_special_tokens=False,
         return_offsets_mapping=True,
         verbose=False,
     )
-    offsets = encoding["offset_mapping"]
-    word_ids = encoding.word_ids()
+    offsets = list(encoding["offset_mapping"])
+    raw_words = encoding.word_ids()
+    word_ids = list(raw_words) if raw_words is not None else []
+    if len(word_ids) != len(offsets):
+        word_ids = [None] * len(offsets)
+    layout: list[tuple[int, int, int | None]] = []
+    for (rel_start, rel_end), word_id in zip(offsets, word_ids, strict=True):
+        if rel_start < rel_end:
+            layout.append((start + rel_start, start + rel_end, word_id))
+    return layout
+
+
+def _word_boundary(tokens: list[tuple[int, int, int | None]], j: int) -> int:
+    """Pull *j* back so the cut is not mid-word. Always leaves at least one token."""
+    if j >= len(tokens):
+        return j
+    k = j
+    while k > 1 and tokens[k][2] is not None and tokens[k][2] == tokens[k - 1][2]:
+        k -= 1
+    if k > 1 and tokens[k][2] != tokens[k - 1][2]:
+        return k
+    return j
+
+
+def _hard_cut(text: str, start: int, end: int) -> list[_Span]:
+    """Cut text[start:end] into contiguous spans of at most TARGET_CHUNK_TOKENS.
+
+    Cuts prefer word boundaries. Characters the tokenizer does not emit (spaces
+    between tokens, and any tail) stay in a span, so the slices cover [start, end)
+    exactly and a citation never drops source text. The token count is measured
+    on the slice itself: retokenizing a token window can be larger than the
+    window, and that count is what the embedder will see.
+    """
     spans: list[_Span] = []
-    i = 0
-    while i < len(offsets):
-        j = min(i + TARGET_CHUNK_TOKENS, len(offsets))
-        k = j
-        while j < len(offsets) and k > i + 1 and word_ids[k] == word_ids[k - 1]:
-            k -= 1
-        if k > i + 1:
-            j = k
-        a, b = start + offsets[i][0], start + offsets[j - 1][1]
-        spans.append(_Span(a, b, count_tokens(text[a:b])))
-        i = j
+    cursor = start
+    while cursor < end:
+        remaining = count_tokens(text[cursor:end])
+        if remaining <= TARGET_CHUNK_TOKENS:
+            spans.append(_Span(cursor, end, remaining))
+            break
+        tokens = _token_layout(text, cursor, end)
+        if not tokens:
+            spans.append(_Span(cursor, cursor + 1, count_tokens(text[cursor : cursor + 1])))
+            cursor += 1
+            continue
+        j = _word_boundary(tokens, min(TARGET_CHUNK_TOKENS, len(tokens)))
+        cut = cursor
+        while j >= 1:
+            # Include the gap before the next token so it is not dropped between spans.
+            candidate = tokens[j][0] if j < len(tokens) else end
+            if candidate > cursor and count_tokens(text[cursor:candidate]) <= TARGET_CHUNK_TOKENS:
+                cut = candidate
+                break
+            j -= 1
+        if cut <= cursor:
+            cut = cursor + 1
+        spans.append(_Span(cursor, cut, count_tokens(text[cursor:cut])))
+        cursor = cut
     return spans
 
 
@@ -185,35 +232,55 @@ def _overlap_start(text: str, start: int, end: int) -> tuple[int, int] | None:
 
 
 def _pack(text: str, pieces: list[_Span]) -> list[tuple[int, int]]:
-    """Greedily pack pieces into [start, end) windows of at most TARGET_CHUNK_TOKENS."""
+    """Greedily pack pieces into [start, end) windows of at most TARGET_CHUNK_TOKENS.
+
+    The budget is the token count of the window text, not the sum of piece
+    counts. Piece sums ignore the separators the window still contains, and a
+    page of short lines can blow past the embedder's limit that way.
+    """
     windows: list[tuple[int, int]] = []
     start: int | None = None
     end = 0
-    tokens = 0
     for piece in pieces:
-        if start is not None and tokens + piece.tokens > TARGET_CHUNK_TOKENS:
+        if start is not None and count_tokens(text[start : piece.end]) > TARGET_CHUNK_TOKENS:
             windows.append((start, end))
             overlap = _overlap_start(text, start, end)
-            if overlap is not None and overlap[1] + piece.tokens <= TARGET_CHUNK_TOKENS:
-                start, tokens = overlap
+            if (
+                overlap is not None
+                and count_tokens(text[overlap[0] : piece.end]) <= TARGET_CHUNK_TOKENS
+            ):
+                start = overlap[0]
             else:
                 start = None
         if start is None:
-            start, tokens = piece.start, 0
+            start = piece.start
         end = piece.end
-        tokens += piece.tokens
     if start is not None:
         windows.append((start, end))
     return windows
 
 
-def _parent(heading_path: str) -> str:
-    return heading_path.rpartition(_HEADING_SEPARATOR)[0]
+def _parent(heading_path: str) -> str | None:
+    """Parent heading, or None when *heading_path* is top-level."""
+    parent, sep, _child = heading_path.rpartition(_HEADING_SEPARATOR)
+    if not sep:
+        return None
+    return parent
 
 
 def _related(a: str, b: str) -> bool:
-    """True when two headings are siblings, or one is the other's direct parent."""
-    return a == b or _parent(a) == _parent(b) or a == _parent(b) or _parent(a) == b
+    """True when two headings match, are siblings, or one is the other's direct parent.
+
+    A missing parent is not a shared parent. Treating "" as one would merge
+    unrelated top-level sections (Fees with Housing) and drop both headings.
+    """
+    if a == b:
+        return True
+    parent_a = _parent(a)
+    parent_b = _parent(b)
+    if parent_a is not None and parent_a == parent_b:
+        return True
+    return (parent_b is not None and a == parent_b) or (parent_a is not None and b == parent_a)
 
 
 def _common_heading(paths: list[str]) -> str:
@@ -226,26 +293,32 @@ def _common_heading(paths: list[str]) -> str:
     return _HEADING_SEPARATOR.join(common)
 
 
+def _can_merge(group: list[ExtractBlock], block: ExtractBlock) -> bool:
+    """True when *block* should ride along with *group* as one target-sized chunk."""
+    previous = group[-1]
+    if block.char_start != previous.char_end + len("\n\n"):
+        return False
+    if not _related(previous.heading_path, block.heading_path):
+        return False
+    group_text = "\n\n".join(part.text for part in group)
+    group_tokens = count_tokens(group_text)
+    block_tokens = count_tokens(block.text)
+    if group_tokens >= MIN_SECTION_TOKENS and block_tokens >= MIN_SECTION_TOKENS:
+        return False
+    # Summing the two counts ignores the joiner and can exceed the target.
+    return count_tokens(f"{group_text}\n\n{block.text}") <= TARGET_CHUNK_TOKENS
+
+
 def _group_blocks(blocks: tuple[ExtractBlock, ...]) -> list[list[ExtractBlock]]:
     """Group adjacent blocks so small sections ride along with a related neighbour."""
     groups: list[list[ExtractBlock]] = []
-    group_tokens: list[int] = []
     for block in blocks:
         if not block.text.strip():
             continue
-        tokens = count_tokens(block.text)
-        if (
-            groups
-            and (tokens < MIN_SECTION_TOKENS or group_tokens[-1] < MIN_SECTION_TOKENS)
-            and group_tokens[-1] + tokens <= TARGET_CHUNK_TOKENS
-            and block.char_start == groups[-1][-1].char_end + len("\n\n")
-            and _related(groups[-1][-1].heading_path, block.heading_path)
-        ):
+        if groups and _can_merge(groups[-1], block):
             groups[-1].append(block)
-            group_tokens[-1] += tokens
         else:
             groups.append([block])
-            group_tokens.append(tokens)
     return groups
 
 
