@@ -187,7 +187,7 @@ flowchart TD
   persistCheck -->|no| skipDoc
 ```
 
-- `is_crawlable_link` rejects asset files (`.css`, `.js`, images, fonts), infrastructure paths (`/_ato/`, `/dist/`, `/.well-known/`), and anything without an http(s) scheme.
+- `is_crawlable_link` rejects asset files (`.css`, `.js`, images, fonts), infrastructure paths (`/_ato/`, `/dist/`, `/.well-known/`), and anything without an http(s) scheme. Relative hrefs never reach it raw: `extract_links` resolves them with `urljoin` against the post-redirect URL and `normalize_url` canonicalizes them first. The allowlist and `robots.txt` are enforced in the crawler, not in this predicate.
 - `is_error_document_url` catches Laurier's 404 helper pages by looking at the final URL after redirects (e.g. paths containing `/404/404.html` or query params like `req=`).
 - `is_persistable_fetch` guards what actually gets written to `documents` — only real 200 responses with accepted content-types.
 
@@ -231,15 +231,18 @@ flowchart TB
   persist --> results
 ```
 
-URLs on the queue were allowlisted when enqueued (seeds via `normalize_url`; discovered links only if they passed `is_crawlable_link`). The fetch loop does **not** call `is_crawlable_link` again before GET.
+Every URL is checked against the hostname allowlist (`normalize_url`) and that host's `robots.txt` before it is enqueued, and both are checked again before GET. A link discovered on one allowlisted host is judged against the target host's `robots.txt`, not the page that linked to it. Redirect hops are followed only when the next URL passes the same two checks; the body of an off-allowlist or robots-disallowed target is never requested and is never mined for links. The asset denylist (`is_crawlable_link`) runs at enqueue time and is not repeated on GET.
 
 Key behaviours:
-- Politeness: ≥ 1 s delay per host, one concurrent connection per host, descriptive `User-Agent` with a contact address.
+- **Relative links.** `<a href>` values are parsed with `HTMLParser`. Fragment-only hrefs and non-http(s) schemes (`mailto:`, `tel:`, `javascript:`, `ftp:`, …) are dropped. Everything else is resolved with `urljoin(final_url, href)` against the post-redirect URL, so `page.html`, `../x`, and `section.php?cal=1` are kept. Fragments are removed.
+- **Canonical URLs, before dedupe.** Scheme is forced to https, the host is lowercased (an explicit port is kept), and a trailing `index.html` path segment is removed so `/x/` and `/x/index.html` are one URL. `index.php` is not removed. A filename that only ends in those letters (`/my-index.html`) is left as-is. Seeds that canonicalize to the same URL are enqueued once.
+- **`CRAWL_MAX_PAGES` is global.** The cap counts pages fetched across every host in the run. It is not a per-host budget (five hosts do not mean five times the cap).
+- Politeness: ≥ 1 s delay per host queue, one concurrent connection per host queue, descriptive `User-Agent` with a contact address.
 - Etag caching: sends `If-None-Match` on revisit; a 304 means the page hasn't changed and the body is not reprocessed.
 - Content is hashed from raw bytes so PDFs and HTML stay consistent with the stored hash.
 - `CrawlResult.body` and `.content_type` are kept in memory so the orchestrator can pass them straight to `extract_document` without re-fetching.
 
-**In plain terms:** The crawler walks Laurier’s site from the seed URLs, follows links within the rules, downloads each page (or skips it if unchanged), and records what it found so the next steps can read the page without hitting the web again.
+**In plain terms:** The crawler walks Laurier’s public pages from the seed list, follows the relative links those pages actually use, and stops at one shared page budget. A host that is not on the allowlist, or a path `robots.txt` forbids, never gets fetched.
 
 ---
 
