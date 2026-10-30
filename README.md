@@ -4,6 +4,39 @@
 
 Ask a question, get a plain-language answer with a link to the Laurier page it came from. Where two official pages disagree, LOCAH shows you both. Where Laurier's site doesn't answer, LOCAH says so and tells you who to ask.
 
+## How it fits together
+
+```mermaid
+flowchart TB
+  subgraph sources [Public sources]
+    WLU[wlu.ca pages]
+  end
+  subgraph ingest [Ingest — batch / offline]
+    Crawl[Crawl and hash]
+    Extract[Extract text]
+    Chunk[Chunk]
+    Embed[Embed vectors]
+  end
+  subgraph store [Knowledge store]
+    PG[(Postgres + pgvector)]
+  end
+  subgraph servePlanned [Answer path — planned S2]
+    FE[Next.js chat]
+    API[FastAPI]
+    Ret[Retrieval + LLM]
+    LLM[LLM provider]
+  end
+  WLU --> Crawl --> Extract --> Chunk --> Embed --> PG
+  FE -.-> API
+  API -.-> Ret
+  Ret -.-> PG
+  Ret -.-> LLM
+```
+
+Solid arrows are what runs today (ingest → Postgres). Dashed arrows are the student Q&A path — frontend chat, `/ask`, retrieval, and an LLM provider are not fully wired in `app/main.py` yet.
+
+For ingest details see [`backend/app/ingest/README.md`](backend/app/ingest/README.md).
+
 ## What it does not do
 
 - It does not store your personal information. There are no accounts.
