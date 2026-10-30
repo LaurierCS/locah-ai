@@ -223,6 +223,29 @@ docker compose down          # stop a leftover stack cleanly
 Then either stop the conflicting process, or remap the host port in
 `docker-compose.yml` (e.g. `"5433:5432"`) and update `DATABASE_URL` to match.
 
+### API `uv run` fails or points at `/app/.venv` after a compose update
+
+Symptom: `uv run uvicorn …` or migrations inside the `api` container fail with a
+missing interpreter, bad shebang, or a venv path under `/app/.venv` while compose
+expects `/opt/venv`.
+
+Cause: named volume **`api-venv-opt`** (formerly `api-venv`) is created once. An old
+volume populated at `/app/.venv` keeps scripts with the wrong paths when mounted at
+`/opt/venv`.
+
+Fix:
+
+```bash
+docker compose down
+docker volume rm eng_api-venv eng_api-venv-opt 2>/dev/null || true   # prefix may match your project dir name
+docker compose up -d --build api
+docker compose exec api uv run alembic upgrade head
+```
+
+If the image was built before `UV_PROJECT_ENVIRONMENT=/opt/venv` in `backend/Dockerfile`,
+run `docker compose build api` as well. A fresh volume **and** a current image are both
+required.
+
 ### pgvector: "extension \"vector\" does not exist" / vector type errors
 
 Symptom: migrations or queries fail with `type "vector" does not exist` or

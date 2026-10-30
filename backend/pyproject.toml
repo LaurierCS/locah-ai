@@ -6,22 +6,22 @@ dependencies = [
   "fastapi>=0.143.0",
   "uvicorn[standard]>=0.54.0",
   "pydantic>=2.14.1",
-  "pydantic-settings>=2.10",
+  "pydantic-settings>=2.16.1",
   "sqlalchemy>=2.0.54",
   "psycopg[binary]>=3.3.6",
   "pgvector>=0.5.1",
   "alembic>=1.16",
   "anthropic>=1.13.0",
   "httpx>=0.28",
-  "trafilatura>=2.3.0",
-  "pypdf>=6.19.0",
+  "trafilatura>=2.3.1",
+  "pypdf>=6.21.2",
   "scikit-learn>=1.7",
   "pyyaml>=6.0",
   "sentence-transformers>=3.0.0",
 ]
 
 [build-system]
-requires = ["setuptools>=84.0.0"]
+requires = ["setuptools>=84.1.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
@@ -31,7 +31,7 @@ include = ["app*"]
 dev = [
   "pytest>=8.4",
   "pytest-asyncio>=1.1",
-  "ruff>=0.17.0",
+  "ruff>=0.17.1",
   "mypy>=2.4.0",
   "respx>=0.22",
 ]
