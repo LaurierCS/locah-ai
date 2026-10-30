@@ -62,12 +62,16 @@ _ERROR_QUERY_PARAMS: tuple[str, ...] = (
 
 
 def is_crawlable_link(url: str) -> bool:
-    """Return True when a discovered link should be enqueued for crawling.
+    """Return True when a normalized link should be enqueued for crawling.
 
     Rejects asset files, infrastructure paths, and Laurier error-page helpers
-    before spending a network round-trip on them.  Also rejects relative URLs
-    and anything without an http(s) scheme (the crawler only handles absolute
-    URLs; normalize_url is the primary guard, but this is a defensive belt).
+    before spending a network round-trip on them. ``extract_links`` resolves
+    every navigational href with ``urljoin`` against the post-redirect
+    ``final_url``, then ``normalize_url`` canonicalizes it (https, lowercased
+    host, fragment dropped, trailing ``index.html`` segment removed, allowlist)
+    before this check. A relative or non-http(s) URL that still arrives here
+    is rejected as a defensive guard. robots.txt is applied separately, on
+    the URL's own host, before the link is enqueued.
     """
     try:
         parsed = urlparse(url)
