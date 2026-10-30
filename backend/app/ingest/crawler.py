@@ -1,4 +1,9 @@
-"""Web crawler for wlu.ca — respects robots.txt, enforces allowlist scope, maintains politeness delays."""
+"""Web crawler for public Laurier pages.
+
+Respects robots.txt, enforces the hostname allowlist (INV-1), resolves relative
+links against the post-redirect URL, and applies ``CRAWL_MAX_PAGES`` once
+across every host.
+"""
 
 import asyncio
 import hashlib
@@ -18,6 +23,11 @@ from app.ingest.seeds import load_seeds
 from app.ingest.url_policy import is_crawlable_link, is_error_document_url, is_persistable_fetch
 
 logger = logging.getLogger(__name__)
+
+# Redirects are followed only after the next URL passes the allowlist and
+# robots.txt. httpx is not asked to follow them on its own.
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_MAX_REDIRECTS = 5
 
 
 @dataclass
@@ -68,12 +78,15 @@ class CrawlerState:
         self.host_queues: dict[str, HostQueue] = {}
         self.all_fetched: set[str] = set()
         self.results: list[CrawlResult] = []
+        # Serializes the global CRAWL_MAX_PAGES reservation. Hosts crawl
+        # concurrently; the lock keeps the shared budget from overshooting.
+        self._page_lock = asyncio.Lock()
 
     async def __aenter__(self) -> Self:
         self.http_client = httpx.AsyncClient(
             timeout=30.0,
             headers={"User-Agent": self.config.user_agent},
-            follow_redirects=True,
+            follow_redirects=False,
         )
         return self
 
@@ -82,32 +95,45 @@ class CrawlerState:
             await self.http_client.aclose()
 
     def normalize_url(self, url: str) -> str | None:
-        """
-        Parse and validate URL against allowlist.
+        """Return the canonical crawl URL, or None if it must not be fetched.
 
-        Returns normalized URL or None if out-of-scope.
+        Applied before dedupe:
+
+        - Drop anything that is not http(s) (``mailto:``, ``tel:``,
+          ``javascript:``, ``ftp:``, and other schemes stay None — they are
+          never rewritten onto https).
+        - Force the scheme to https.
+        - Lowercase the host. Keep a port only when one was explicit.
+        - Drop the fragment.
+        - Strip a trailing ``index.html`` path segment so ``/x/`` and
+          ``/x/index.html`` are one URL. ``index.php`` is kept (calendar
+          pages use it with a query string). A filename that merely ends in
+          ``index.html`` (``/my-index.html``) is left alone.
+        - Reject hosts that are not on the allowlist (INV-1).
         """
         try:
             parsed = urlparse(url)
-            host = parsed.hostname or ""
-            host_lower = host.lower()
+            if parsed.scheme not in ("http", "https", ""):
+                logger.debug(f"Dropping non-http(s) URL: {url}")
+                return None
 
-            # Check allowlist (INV-1)
+            host_lower = (parsed.hostname or "").lower()
+
+            # Check allowlist (INV-1). Hostname is empty for relative URLs that
+            # were not resolved with urljoin first.
             if host_lower not in self.config.allowlist:
                 logger.warning(f"URL out-of-scope (host not allowlisted): {url}")
                 return None
 
-            # Reconstruct as normalized URL
-            scheme = "https"
-            netloc = parsed.netloc
+            netloc = f"{host_lower}:{parsed.port}" if parsed.port else host_lower
 
             path = parsed.path or "/"
-            path = path.removesuffix("index.html")
+            if path.endswith("/index.html"):
+                path = path[: -len("index.html")]
 
-            query = parsed.query
-            normalized = f"{scheme}://{netloc}{path}"
-            if query:
-                normalized += f"?{query}"
+            normalized = f"https://{netloc}{path}"
+            if parsed.query:
+                normalized += f"?{parsed.query}"
             return normalized
         except (ValueError, AttributeError, TypeError) as e:
             logger.warning(f"Failed to parse URL {url}: {e}")
@@ -128,25 +154,49 @@ class CrawlerState:
             logger.debug(f"Fetched robots.txt for {host}")
         except (httpx.RequestError, RuntimeError) as e:
             logger.warning(f"Failed to fetch robots.txt for {host}: {e}")
-            # If robots.txt is unavailable, assume no restrictions
+            # Leave the parser unparsed. can_fetch() is False until parse()
+            # runs, so a failed fetch fails closed (INV-1) instead of
+            # treating the host as unrestricted.
         finally:
             self.robots_parsers[host] = parser
         return parser
 
+    async def _robots_allow(self, url: str, host: str) -> bool:
+        """Return whether robots.txt for ``host`` allows ``url``.
+
+        ``host`` must be the URL's own hostname. A link discovered on another
+        allowlisted host is still judged against the target host's file (INV-1).
+        """
+        parser = await self.get_robots_txt_parser(host)
+        if parser.can_fetch(self.config.user_agent, url):
+            return True
+        logger.warning(f"Robots.txt disallows: {url}")
+        return False
+
     async def should_crawl_url(self, url: str, host: str) -> bool:
-        """Check if URL should be crawled (robots.txt, already fetched, etc.)."""
-        # Already fetched in this session?
+        """Return False when ``url`` was already fetched or robots.txt forbids it.
+
+        Robots.txt is loaded for the URL's hostname. ``host`` is only the
+        fallback when the URL has no hostname.
+        """
         if url in self.all_fetched:
             logger.debug(f"URL already fetched in session: {url}")
             return False
 
-        # Check robots.txt
-        parser = await self.get_robots_txt_parser(host)
-        if not parser.can_fetch(self.config.user_agent, url):
-            logger.warning(f"Robots.txt disallows: {url}")
-            return False
+        url_host = (urlparse(url).hostname or host).lower()
+        return await self._robots_allow(url, url_host)
 
-        return True
+    async def _redirect_target_allowed(self, url: str) -> bool:
+        """Return True when a redirect hop may be requested (INV-1).
+
+        Both the hostname allowlist and that host's robots.txt have to allow
+        the target. The check is silent; ``crawl_host`` records the skip.
+        """
+        host = (urlparse(url).hostname or "").lower()
+        if host not in self.config.allowlist:
+            return False
+        parser = await self.get_robots_txt_parser(host)
+        return parser.can_fetch(self.config.user_agent, url)
 
     async def fetch_and_hash(
         self, url: str, etag: str | None = None
@@ -155,39 +205,64 @@ class CrawlerState:
         Fetch URL, compute content hash, handle etag.
 
         Returns (body, content_hash, http_status, new_etag, content_type, final_url).
-        Body is empty if unchanged (304) or fetch failed.
-        final_url is the URL after all redirects (httpx follows them automatically).
-        One retry is attempted on transient RequestError to handle server disconnects.
+        Body is empty if unchanged (304), the response was not an accepted
+        content type, or the fetch failed.
+
+        Redirects are followed manually, up to ``_MAX_REDIRECTS``. A hop whose
+        host is off the allowlist, or which that host's robots.txt disallows,
+        is not requested. In that case ``final_url`` is the refused target and
+        ``http_status`` is the redirect status, with an empty body.
+
+        ``final_url`` on a completed fetch is the post-redirect URL. Link
+        extraction must resolve relative hrefs against it. One retry is
+        attempted on a transient RequestError.
         """
         if self.http_client is None:
             raise RuntimeError("HTTP client not initialized")
+        client = self.http_client
 
         async def _do_fetch() -> tuple[bytes, str, int, str | None, str, str]:
-            headers = {}
+            headers: dict[str, str] = {}
             if etag:
                 headers["If-None-Match"] = etag
 
-            resp = await self.http_client.get(url, headers=headers)  # type: ignore[union-attr]
-            final_url = str(resp.url)
+            current = url
+            for _hop in range(_MAX_REDIRECTS + 1):
+                resp = await client.get(current, headers=headers, follow_redirects=False)
+                if resp.status_code == 304:
+                    logger.debug(f"304 Not Modified for {current}")
+                    return b"", hashlib.sha256(b"").hexdigest(), 304, etag, "", str(resp.url)
 
-            # 304 Not Modified — content unchanged
-            if resp.status_code == 304:
-                logger.debug(f"304 Not Modified for {url}")
-                return b"", hashlib.sha256(b"").hexdigest(), 304, etag, "", final_url
+                if resp.status_code in _REDIRECT_STATUSES:
+                    location = resp.headers.get("location")
+                    if not location:
+                        return b"", "", resp.status_code, None, "", str(resp.url)
+                    next_url = urljoin(str(resp.url), location.strip())
+                    if not await self._redirect_target_allowed(next_url):
+                        logger.warning(f"Refusing redirect {current} → {next_url}")
+                        return b"", "", resp.status_code, None, "", next_url
+                    current = next_url
+                    headers = {}
+                    continue
 
-            # Check content-type
-            content_type = resp.headers.get("content-type", "").lower()
-            if not any(ct in content_type for ct in self.config.content_types):
-                logger.warning(f"Content-type not accepted for {url}: {content_type}")
-                return b"", "", resp.status_code, None, content_type, final_url
+                final_url = str(resp.url)
+                content_type = resp.headers.get("content-type", "").lower()
+                if not any(ct in content_type for ct in self.config.content_types):
+                    logger.warning(f"Content-type not accepted for {current}: {content_type}")
+                    return b"", "", resp.status_code, None, content_type, final_url
 
-            # Hash raw bytes so PDFs and HTML stay consistent with stored etag/hash logic.
-            body = resp.content
-            content_hash = hashlib.sha256(body).hexdigest()
-            new_etag = resp.headers.get("etag")
+                # Hash raw bytes so PDFs and HTML stay consistent with stored etag/hash logic.
+                body = resp.content
+                content_hash = hashlib.sha256(body).hexdigest()
+                new_etag = resp.headers.get("etag")
 
-            logger.debug(f"Fetched {url} — hash {content_hash[:8]}..., status {resp.status_code}")
-            return body, content_hash, resp.status_code, new_etag, content_type, final_url
+                logger.debug(
+                    f"Fetched {current} — hash {content_hash[:8]}..., status {resp.status_code}"
+                )
+                return body, content_hash, resp.status_code, new_etag, content_type, final_url
+
+            logger.warning(f"Too many redirects for {url}")
+            return b"", "", 0, None, "", current
 
         try:
             return await _do_fetch()
@@ -204,14 +279,21 @@ class CrawlerState:
                 return b"", "", 0, None, "", url
 
     async def extract_links(
-        self, url: str, body: bytes, content_type: str, depth: int
+        self, base_url: str, body: bytes, content_type: str, depth: int
     ) -> list[str]:
-        """Extract crawlable internal links from HTML content.
+        """Extract crawlable links from HTML.
 
-        Only returns links that pass both the allowlist (normalize_url) and
-        the asset/error-page denylist (is_crawlable_link).
+        ``base_url`` is the post-redirect final URL. Every navigational href
+        is resolved with ``urljoin(base_url, href)`` (absolute hrefs pass
+        through urljoin unchanged). Fragment-only hrefs and non-http(s)
+        schemes are dropped before resolution so they cannot be rewritten
+        onto https.
+
+        A link is returned only after ``normalize_url`` (allowlist plus
+        canonical form) and ``is_crawlable_link`` (asset denylist) both pass.
+        robots.txt is applied later, before the URL is enqueued or fetched.
         """
-        links = []
+        links: list[str] = []
         if not body or depth >= self.config.depth_cap:
             return links
         if "text/html" not in content_type.lower():
@@ -219,59 +301,103 @@ class CrawlerState:
 
         content = body.decode("utf-8", errors="replace")
 
-        for link in _parse_hrefs(content):
-            # Resolve relative URLs
-            if link.startswith("/"):
-                link = urljoin(url, link)
-
-            # Allowlist check (host must be in CRAWL_ALLOWLIST)
-            normalized = self.normalize_url(link)
+        for raw_href in _parse_hrefs(content):
+            if not _is_navigational_href(raw_href):
+                continue
+            resolved = urljoin(base_url, raw_href.strip())
+            normalized = self.normalize_url(resolved)
             if not normalized:
                 continue
-            # Denylist check (assets, 404 helpers, infrastructure paths)
             if not is_crawlable_link(normalized):
                 logger.debug(f"Denylist link skipped: {normalized}")
                 continue
-            # Prevent duplicates
             if normalized not in links:
                 links.append(normalized)
         return links
 
+    def _queue_contains(self, queue: HostQueue, url: str) -> bool:
+        return any(url == queued for queued, _depth in queue.urls)
+
+    async def _enqueue(
+        self, queue: HostQueue, url: str, depth: int, results: list[CrawlResult]
+    ) -> None:
+        """Enqueue ``url`` only when allowlist and robots.txt both allow it.
+
+        INV-1: a URL that fails either check never sits on the queue. robots.txt
+        is the file for the URL's own host, not the host that discovered it.
+        """
+        link_host = (urlparse(url).hostname or "").lower()
+        if link_host not in self.config.allowlist:
+            logger.warning(f"URL out-of-scope (host not allowlisted): {url}")
+            return
+        if url in self.all_fetched or self._queue_contains(queue, url):
+            return
+        if not await self._robots_allow(url, link_host):
+            results.append(CrawlResult(url, "skip", reason="robots.txt"))
+            return
+        queue.urls.append((url, depth))
+
     async def crawl_host(
         self, host: str, seed_urls: list[str], session: AsyncSession | None = None
     ) -> list[CrawlResult]:
-        """Crawl a single host: fetch seeds, follow links, respect politeness."""
+        """Crawl one host queue: seeds, then discovered links.
+
+        ``CRAWL_MAX_PAGES`` is a single budget shared with every other host
+        (``all_fetched``), not a per-host limit. Seeds that canonicalize to
+        the same URL are enqueued once. Discovered links are resolved from
+        the post-redirect final URL.
+        """
         host_results: list[CrawlResult] = []
         queue = HostQueue(host=host)
 
-        # Enqueue seeds at depth 0
+        seen_seeds: set[str] = set()
         for seed_url in seed_urls:
             normalized = self.normalize_url(seed_url)
-            if normalized:
-                queue.urls.append((normalized, 0))
+            if not normalized or normalized in seen_seeds:
+                continue
+            seen_seeds.add(normalized)
+            await self._enqueue(queue, normalized, 0, host_results)
 
         logger.info(f"Starting crawl of {host} with {len(queue.urls)} seeds")
 
-        while queue.urls and len(queue.fetched) < self.config.max_pages:
-            url, depth = queue.urls.pop(0)
+        while queue.urls and len(self.all_fetched) < self.config.max_pages:
+            url, depth = queue.urls[0]
+            link_host = (urlparse(url).hostname or host).lower()
 
-            # Enforce per-host concurrency (1) and delay
+            if link_host not in self.config.allowlist:
+                queue.urls.pop(0)
+                host_results.append(CrawlResult(url, "skip", reason="host not allowlisted"))
+                continue
+
+            # Enforce per-host concurrency (1) and delay.
             async with queue.semaphore:
-                # Rate limiting: ≥1s delay per host
                 if queue.last_fetch_time:
                     elapsed = (datetime.now(UTC) - queue.last_fetch_time).total_seconds()
                     if elapsed < self.config.delay_seconds:
                         await asyncio.sleep(self.config.delay_seconds - elapsed)
 
-                # Scope and robots.txt check
-                should_fetch = await self.should_crawl_url(url, host)
+                # robots.txt for this URL's host, and the session dedupe set.
+                should_fetch = await self.should_crawl_url(url, link_host)
                 if not should_fetch:
+                    queue.urls.pop(0)
                     host_results.append(
                         CrawlResult(url, "skip", reason="robots.txt or already fetched")
                     )
                     continue
 
-                # Fetch and hash
+                # Reserve a slot in the global page budget before the GET so
+                # concurrent hosts cannot each pass the cap check.
+                async with self._page_lock:
+                    if url in self.all_fetched:
+                        queue.urls.pop(0)
+                        host_results.append(CrawlResult(url, "skip", reason="already fetched"))
+                        continue
+                    if len(self.all_fetched) >= self.config.max_pages:
+                        break
+                    self.all_fetched.add(url)
+                    queue.fetched.add(url)
+                    queue.urls.pop(0)
+
                 (
                     body,
                     content_hash,
@@ -282,8 +408,34 @@ class CrawlerState:
                 ) = await self.fetch_and_hash(url)
 
                 queue.last_fetch_time = datetime.now(UTC)
-                queue.fetched.add(url)
-                self.all_fetched.add(url)
+                final_url = final_url or url
+                final_host = (urlparse(final_url).hostname or "").lower()
+
+                # A redirect off the allowlist must not be stored or mined
+                # for further links (INV-1). The GET already followed the
+                # redirect inside httpx; drop the body here.
+                if final_host not in self.config.allowlist:
+                    logger.warning(f"Redirect left the allowlist for {url} → {final_url}")
+                    host_results.append(
+                        CrawlResult(
+                            url,
+                            "skip",
+                            reason="redirected off allowlist",
+                            final_url=final_url,
+                        )
+                    )
+                    continue
+
+                if not await self._robots_allow(final_url, final_host):
+                    host_results.append(
+                        CrawlResult(
+                            url,
+                            "skip",
+                            reason="robots.txt disallows redirect target",
+                            final_url=final_url,
+                        )
+                    )
+                    continue
 
                 # If the server redirected us to a Laurier error page, treat as
                 # a skip so we never persist a junk document row.
@@ -294,11 +446,8 @@ class CrawlerState:
                             url, "skip", reason="redirected to error page", final_url=final_url
                         )
                     )
-                    # Still extract links from the original body if any were fetched,
-                    # but in practice error pages have no useful onward links.
                     continue
 
-                # Track result
                 if http_status in (200, 304):
                     host_results.append(
                         CrawlResult(
@@ -322,11 +471,10 @@ class CrawlerState:
                         )
                     )
 
-                # Extract and enqueue new links
-                new_links = await self.extract_links(url, body, content_type, depth)
+                # Resolve new links against the post-redirect URL.
+                new_links = await self.extract_links(final_url, body, content_type, depth)
                 for link in new_links:
-                    if link not in self.all_fetched and link not in [u for u, _ in queue.urls]:
-                        queue.urls.append((link, depth + 1))
+                    await self._enqueue(queue, link, depth + 1, host_results)
 
         logger.info(f"Completed crawl of {host}: {len(queue.fetched)} pages fetched")
         return host_results
@@ -456,6 +604,19 @@ async def persist_crawl_results(
 
     await session.commit()
     logger.info(f"Persisted {persisted} documents ({skipped} skipped — empty body/non-200)")
+
+
+def _is_navigational_href(href: str) -> bool:
+    """Return True for http(s) and scheme-less hrefs that ``urljoin`` can resolve.
+
+    Fragment-only links (``#section``) and non-http(s) schemes (``mailto:``,
+    ``tel:``, ``javascript:``, ``ftp:``, ``data:``, ...) are not crawl targets.
+    """
+    stripped = href.strip()
+    if not stripped or stripped.startswith("#"):
+        return False
+    scheme = urlparse(stripped).scheme
+    return scheme in ("", "http", "https")
 
 
 def _parse_hrefs(html: str) -> list[str]:

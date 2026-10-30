@@ -65,10 +65,13 @@ def is_crawlable_link(url: str) -> bool:
     """Return True when a normalized link should be enqueued for crawling.
 
     Rejects asset files, infrastructure paths, and Laurier error-page helpers
-    before spending a network round-trip on them.  Relative links are resolved
-    against the page URL in ``extract_links`` and canonicalized by
-    ``normalize_url`` before reaching this check, so any remaining relative or
-    non-http(s) URL is rejected here as a defensive guard.
+    before spending a network round-trip on them. ``extract_links`` resolves
+    every navigational href with ``urljoin`` against the post-redirect
+    ``final_url``, then ``normalize_url`` canonicalizes it (https, lowercased
+    host, fragment dropped, trailing ``index.html`` segment removed, allowlist)
+    before this check. A relative or non-http(s) URL that still arrives here
+    is rejected as a defensive guard. robots.txt is applied separately, on
+    the URL's own host, before the link is enqueued.
     """
     try:
         parsed = urlparse(url)
