@@ -20,7 +20,7 @@ dependencies = [
   "sentence-transformers>=3.0.0",
   # Imported directly by the chunker (AutoTokenizer). Also a transitive dep of
   # sentence-transformers; declared here so a lockfile refresh cannot drop it.
-  "transformers>=4.41.0",
+  "transformers>=5.22.1",
 ]
 
 [build-system]
