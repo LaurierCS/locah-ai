@@ -28,7 +28,7 @@ jobs:
           key: ${{ runner.os }}-huggingface-${{ hashFiles('backend/uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-huggingface-
-      - uses: astral-sh/setup-uv@v10.3.2
+      - uses: astral-sh/setup-uv@v10.3.3
         with:
           python-version: "3.14"
       - run: uv sync --frozen
